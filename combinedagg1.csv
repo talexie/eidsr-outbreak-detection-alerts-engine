@@ -1,0 +1,21 @@
+,orgUnitName,orgUnit,disease,dateOfOnSetWeek,confirmedValue,suspectedValue,firstCaseDate,lastCaseDate,reportingOrgUnitName,reportingOrgUnit,alertThreshold,epiThreshold,incubationDays,endDate,reminderDate,active,reminder,epidemic,alert
+0,Gacuba Ii CS,rnM981srks2,Cholera,2017W37,1.0,1.0,2017-09-14,2017-09-14,Gisenyi Sub District,KMmYr3zS8A6,1,1,18,2017-10-20,2017-09-25,false,false,true,false
+1,Gashora CS,BPZcHDS6OO0,Cholera,2017W42,2.0,4.0,2017-10-20,2017-10-21,Nyamata Sub District,hDsNksdRjyK,1,1,18,2017-11-26,2017-11-01,false,false,true,false
+2,Gisenyi DH,Sbzd3FNR8zA,Cholera,2017W36,1.0,1.0,2017-09-08,2017-09-08,Gisenyi Sub District,KMmYr3zS8A6,1,1,18,2017-10-14,2017-09-19,false,false,true,false
+3,Ngarama CS,b3P67XGwUEf,Cholera,2017W18,0.0,1.0,2017-05-01,2017-05-08,Ngarama Sub District,nr6F3HKvHu5,1,1,18,2017-06-13,2017-05-19,false,false,false,true
+4,Ngarama CS,b3P67XGwUEf,Cholera,2017W19,0.0,1.0,2017-05-01,2017-05-08,Ngarama Sub District,nr6F3HKvHu5,1,1,18,2017-06-13,2017-05-19,false,false,false,true
+5,Nkanka CS,Ff3uFhrM9Br,Cholera,2017W36,0.0,3.0,2017-09-04,2017-10-16,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-21,2017-10-27,false,false,false,true
+6,Nkanka CS,Ff3uFhrM9Br,Cholera,2017W37,0.0,5.0,2017-09-04,2017-10-16,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-21,2017-10-27,false,false,false,true
+7,Nkanka CS,Ff3uFhrM9Br,Cholera,2017W38,1.0,6.0,2017-09-04,2017-10-16,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-21,2017-10-27,false,false,true,false
+8,Nkanka CS,Ff3uFhrM9Br,Cholera,2017W40,0.0,13.0,2017-09-04,2017-10-16,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-21,2017-10-27,false,false,false,true
+9,Nkanka CS,Ff3uFhrM9Br,Cholera,2017W41,0.0,1.0,2017-09-04,2017-10-16,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-21,2017-10-27,false,false,false,true
+10,Nkanka CS,Ff3uFhrM9Br,Cholera,2017W42,0.0,1.0,2017-09-04,2017-10-16,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-21,2017-10-27,false,false,false,true
+11,Nkombo CS,nIlIEOPhfbj,Cholera,2017W33,0.0,2.0,2017-08-16,2017-08-30,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-10-05,2017-09-10,false,false,false,true
+12,Nkombo CS,nIlIEOPhfbj,Cholera,2017W34,0.0,9.0,2017-08-16,2017-08-30,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-10-05,2017-09-10,false,false,false,true
+13,Nkombo CS,nIlIEOPhfbj,Cholera,2017W35,0.0,7.0,2017-08-16,2017-08-30,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-10-05,2017-09-10,false,false,false,true
+14,Rusizi CS,qoW5bj2PwTR,Cholera,2017W33,0.0,1.0,2017-08-20,2017-10-10,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-15,2017-10-21,false,false,false,true
+15,Rusizi CS,qoW5bj2PwTR,Cholera,2017W35,0.0,3.0,2017-08-20,2017-10-10,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-15,2017-10-21,false,false,false,true
+16,Rusizi CS,qoW5bj2PwTR,Cholera,2017W36,0.0,6.0,2017-08-20,2017-10-10,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-15,2017-10-21,false,false,false,true
+17,Rusizi CS,qoW5bj2PwTR,Cholera,2017W37,0.0,3.0,2017-08-20,2017-10-10,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-15,2017-10-21,false,false,false,true
+18,Rusizi CS,qoW5bj2PwTR,Cholera,2017W40,0.0,2.0,2017-08-20,2017-10-10,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-15,2017-10-21,false,false,false,true
+19,Rusizi CS,qoW5bj2PwTR,Cholera,2017W41,0.0,1.0,2017-08-20,2017-10-10,Gihundwe Sub District,YoFjBm3qOTx,1,1,18,2017-11-15,2017-10-21,false,false,false,true
