@@ -214,7 +214,7 @@ class IdsrAppServer:
 
 		if type == 'EPIDEMIC':
 			subject = outbreak['disease'] + " outbreak in " + outbreak['orgUnitName']
-			text = "Dear all," + type.lower() + " threshold for " + outbreak['disease'] + "  is reached at " + outbreak['orgUnitName'] + " of " + outbreak['reportingOrgUnitName']  + " on " + outbreak['eventDate']
+			text = "Dear all," + type.lower() + " threshold for " + outbreak['disease'] + "  is reached at " + outbreak['orgUnitName'] + " of " + outbreak['reportingOrgUnitName']  + " on " + self.today
 		elif type == 'ALERT':
 			subject = outbreak['disease'] + " alert"
 			text = "Dear all, Alert threshold for " + outbreak['disease'] + "  is reached at " + outbreak['orgUnitName'] + " of " + outbreak['reportingOrgUnitName'] + " on " + self.today
@@ -231,7 +231,7 @@ class IdsrAppServer:
 		message.append(organisationUnits)
 
 		message = tuple(message)
-		return (message)
+		return pd.Series(message)
 
 	def sendSmsAndEmailMessage(self,message):
 		messageEndPoint = "messageConversations"
@@ -414,56 +414,53 @@ class IdsrAppServer:
 	# Replace all values with standard text
 	def replaceText(self,df):
 
-		df.replace(to_replace='Confirmed case',value='confirmed',regex=True,inplace=True)
-		df.replace(to_replace='Suspected case',value='suspected',regex=True,inplace=True)
-		df.replace(to_replace='Confirmed',value='confirmed',regex=True,inplace=True)
-		df.replace(to_replace='Suspected',value='suspected',regex=True,inplace=True)
-		df.replace(to_replace='confirmed case',value='confirmed',regex=True,inplace=True)
-		df.replace(to_replace='suspected case',value='suspected',regex=True,inplace=True)
-		df.replace(to_replace='died',value='dead',regex=True,inplace=True)
-		df.replace(to_replace='Died case',value='dead',regex=True,inplace=True)
+		df.replace(to_replace='Confirmed case',value='confirmedValue',regex=True,inplace=True)
+		df.replace(to_replace='Suspected case',value='suspectedValue',regex=True,inplace=True)
+		df.replace(to_replace='Confirmed',value='confirmedValue',regex=True,inplace=True)
+		df.replace(to_replace='Suspected',value='suspectedValue',regex=True,inplace=True)
+		df.replace(to_replace='confirmed case',value='confirmedValue',regex=True,inplace=True)
+		df.replace(to_replace='suspected case',value='suspectedValue',regex=True,inplace=True)
+		df.replace(to_replace='died',value='deathValue',regex=True,inplace=True)
+		df.replace(to_replace='Died case',value='deathValue',regex=True,inplace=True)
 		return df
 
 	# Get Confirmed,suspected cases and deaths
 	def getCaseStatus(self,row=None,columns=None,caseType='CONFIRMED'):
 		if caseType == 'CONFIRMED':
-			if set(['confirmed','confirmedValue']).issubset(columns):
-				return row['confirmedValue']
-			elif set(['confirmed_left','confirmed_right','confirmedValue']).issubset(columns):
-				if int(row['confirmed_left']) <= int(row['confirmed_right']):
-					return row['confirmed_right']
+			if ['confirmedValue'] in columns.values:
+				return int(row['confirmedValue'])
+			elif ['confirmedValue_left','confirmedValue_right'] in columns.values:
+				if int(row['confirmedValue_left']) <= int(row['confirmedValue_right']):
+					return row['confirmedValue_right']
 				else:
-					return row['confirmed_left']
+					return row['confirmedValue_left']
 			else:
 				return 0
 		elif caseType == 'SUSPECTED':
-			if set(['suspected','confirmedValue']).issubset(columns):
-				if int(row['suspected']) <= int(row['confirmedValue']):
+			if ['suspectedValue','confirmedValue'] in columns.values:
+				if int(row['suspectedValue']) <= int(row['confirmedValue']):
 					return row['confirmedValue']
 				else:
-					return row['suspected']
-			elif set(['suspected_left','suspected_right','confirmedValue']).issubset(columns):
-				if int(row['suspected_left']) <= int(row['confirmedValue']):
+					return row['suspectedValue']
+			elif ['suspectedValue_left','suspectedValue_right','confirmedValue'] in columns.values:
+				if (int(row['suspectedValue_left']) <= int(row['confirmedValue'])) and (int(row['suspectedValue_right']) <= int(row['suspectedValue_left'])):
 					return row['confirmedValue']
-				elif int(row['suspected_left']) <= int(row['suspected_right']):
-					return row['suspected_right']
+				elif (int(row['suspectedValue_left']) <= int(row['suspectedValue_right'])) and ((int(row['confirmedValue_left']) <= int(row['suspectedValue_left']))):
+					return row['suspectedValue_right']
 				else:
-					return row['suspected_left']
+					return row['suspectedValue_left']
 			else:
 				return 0
 		elif caseType == 'DEATH':
-			if set(['deaths_left','deaths_right']).issubset(columns):
-				if int(row['deaths_left']) <= int(row['deaths_right']):
-					return row['deaths_right']
+			if ['deathValue_left','deathValue_right'] in columns.values:
+				if int(row['deathValue_left']) <= int(row['deathValue_right']):
+					return row['deathValue_right']
 				else:
-					return row['deaths_left']
-			elif set(['deaths','deathValue']).issubset(columns):
-				if int(row['deaths']) <= int(row['deathValue']):
-					return row['deathValue']
-				else:
-					return row['deaths']
+					return row['deathValue_left']
+			elif ['deathValue'] in columns.values:
+				return row['deathValue']
 			else:
-				return '0'
+				return 0
 
 	# Check if epedimic is active or ended
 	def getStatus(self,row=None,status=None):
@@ -582,8 +579,8 @@ class IdsrAppServer:
 					combinedDf = pd.merge(dfCaseClassification,dfCaseImmediateOutcome,on=['ou','ouname','disease','dateOfOnSet'],how='left').merge(dfTestResultClassification,on=['ou','ouname','disease','dateOfOnSet'],how='left').merge(dfTestResult,on=['ou','ouname','disease','dateOfOnSet'],how='left').merge(dfStatusOutcome,on=['ou','ouname','disease','dateOfOnSet'],how='left')
 					combinedDf.sort_values(['ouname','disease','dateOfOnSet'],ascending=[True,True,True])
 					combinedDf['dateOfOnSetWeek'] = pd.to_datetime(combinedDf['dateOfOnSet']).dt.strftime('%YW%V')
-					combinedDf['confirmedValue'] = combinedDf.apply(self.getCaseStatus,args=([combinedDf.columns]),axis=1)
-					combinedDf['suspectedValue'] = combinedDf.apply(self.getCaseStatus,args=([combinedDf.columns]),axis=1)
+					combinedDf['confirmedValue'] = combinedDf.apply(self.getCaseStatus,args=(combinedDf.columns),axis=1)
+					combinedDf['suspectedValue'] = combinedDf.apply(self.getCaseStatus,args=(combinedDf.columns),axis=1)
 
 					#combinedDf['deathValue'] = combinedDf.apply(self.getCaseStatus,args=([combinedDf.columns]),axis=1)
 
@@ -669,19 +666,13 @@ class IdsrAppServer:
 			return dhis2Events
 	# Add DHIS2 UIDS to new epidemics
 	def assignUids(self,row=None,uids=None,column=None,epidemics=None):
-		uid = ""
+		currentRow = str(row[column])
+		print("Row",currentRow)
 		if row is not None:
-			if str(row[column]) is None:
-				row[column] = uids[0]
-				uid = str(row[column])
+			if currentRow is None:
+				currentRow = uids[0]
 				del uids[0]
-			return uid
-		else:
-
-			for epi in epidemics:
-				epi['event'] = uids[0]
-				del uids[0]
-			return epidemics
+		return currentRow
 
 
 	# Transform updated to DHIS2 JSON events format
@@ -690,7 +681,7 @@ class IdsrAppServer:
 	def createEventDatavalues(self,row=None,config=None,columns=None):
 		dataElements = config
 		event = []
-		for key in columns: # for key in [*row]
+		for key in columns.values: # for key in [*row]
 			if key == 'suspectedValue':
 		 		event.append({'dataElement': self.getDataElement(dataElements,'suspected'),'value':row['suspectedValue']})
 			elif key == 'deathValue':
