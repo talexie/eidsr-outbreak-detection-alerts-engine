@@ -368,12 +368,12 @@ class IdsrAppServer:
 				df['firstCaseDate'] = moment.date(startEndDates[0]).format('YYYY-MM-DD')
 				# Last case date is the end date of the week boundary.
 				startOfEndPeriod = periods[(m+1)].split('W')
-				endDates = self.getStartEndDates(int(startOfEndPeriod[0]),int(startOfEndPeriod[1]))
-				df['lastCaseDate'] = moment.date(endDates[1]).format('YYYY-MM-DD')
+				endDates = moment.date(startEndDates[0] + datetime.timedelta(days=(m-1)*(7/2))).format('YYYY-MM-DD')
+				df['lastCaseDate'] = moment.date(startEndDates[0] + datetime.timedelta(days=(m-1)*(7/2))).format('YYYY-MM-DD')
 				df['endDate'] = ""
 				df['disease'] = diseaseMeta['disease']
 				df['incubationDays'] = diseaseMeta['incubationDays']
-				df['closeDate'] = moment.date(endDates[1] + datetime.timedelta(days= int(diseaseMeta['incubationDays']))).format('YYYY-MM-DD')
+				df['closeDate'] = moment.date(startEndDates[0]).add(days=(m-1)*(7/2)+ int(diseaseMeta['incubationDays'])).format('YYYY-MM-DD')
 				checkEpidemic = "mean_current_cases >= mean20std_mn_cases & mean_current_cases != 0 & mean20std_mn_cases != 0"
 
 				df.query(checkEpidemic,inplace=True)
@@ -381,7 +381,7 @@ class IdsrAppServer:
 					df['epidemic'] = 'true'
 					# Filter out those greater or equal to threshold
 					df = df[df['epidemic'] == 'true']
-					df['closeDate'] = moment.date(endDates[1] + datetime.timedelta(days= int(diseaseMeta['incubationDays']))).format('YYYY-MM-DD')
+					df['closeDate'] = moment.date(startEndDates[0]).add(days=(m-1)*(7/2)+ int(diseaseMeta['incubationDays'])).format('YYYY-MM-DD')
 
 					df['active'] = "true"
 					df['alert'] = "true"
@@ -427,37 +427,52 @@ class IdsrAppServer:
 	# Get Confirmed,suspected cases and deaths
 	def getCaseStatus(self,row=None,columns=None,caseType='CONFIRMED'):
 		if caseType == 'CONFIRMED':
-			if ['confirmedValue'] in columns.values:
+			# if all(elem in columns.values for elem in ['confirmedValue']):
+			if set(['confirmedValue']).issubset(columns.values):
 				return int(row['confirmedValue'])
-			elif ['confirmedValue_left','confirmedValue_right'] in columns.values:
-				if int(row['confirmedValue_left']) <= int(row['confirmedValue_right']):
-					return row['confirmedValue_right']
+			elif set(['confirmedValue_left','confirmedValue_right']).issubset(columns.values):
+				confirmedValue_left = row['confirmedValue_left']
+				confirmedValue_right = row['confirmedValue_right']
+
+				confirmedValue_left = confirmedValue_left if row['confirmedValue_left'] is not None else 0
+				confirmedValue_right = confirmedValue_right if row['confirmedValue_right'] is not None else 0
+				if confirmedValue_left <= confirmedValue_right:
+					return confirmedValue_right
 				else:
-					return row['confirmedValue_left']
+					return confirmedValue_left
 			else:
 				return 0
 		elif caseType == 'SUSPECTED':
-			if ['suspectedValue','confirmedValue'] in columns.values:
+			if set(['suspectedValue','confirmedValue']).issubset(columns.values):
 				if int(row['suspectedValue']) <= int(row['confirmedValue']):
 					return row['confirmedValue']
 				else:
 					return row['suspectedValue']
-			elif ['suspectedValue_left','suspectedValue_right','confirmedValue'] in columns.values:
-				if (int(row['suspectedValue_left']) <= int(row['confirmedValue'])) and (int(row['suspectedValue_right']) <= int(row['suspectedValue_left'])):
+			elif set(['suspectedValue_left','suspectedValue_right','confirmedValue']).issubset(columns.values):
+				suspectedValue_left = row['suspectedValue_left']
+				suspectedValue_right = row['suspectedValue_right']
+
+				suspectedValue_left = suspectedValue_left if row['suspectedValue_left'] is not None else 0
+				suspectedValue_right = suspectedValue_right if row['suspectedValue_right'] is not None else 0
+				if (suspectedValue_left <= row['confirmedValue']) and (suspectedValue_right <= suspectedValue_left):
 					return row['confirmedValue']
-				elif (int(row['suspectedValue_left']) <= int(row['suspectedValue_right'])) and ((int(row['confirmedValue_left']) <= int(row['suspectedValue_left']))):
-					return row['suspectedValue_right']
+				elif (suspectedValue_left <= suspectedValue_right) and (row['confirmedValue'] <= suspectedValue_left):
+					return suspectedValue_right
 				else:
-					return row['suspectedValue_left']
+					return suspectedValue_left
 			else:
 				return 0
 		elif caseType == 'DEATH':
-			if ['deathValue_left','deathValue_right'] in columns.values:
-				if int(row['deathValue_left']) <= int(row['deathValue_right']):
-					return row['deathValue_right']
+			if set(['deathValue_left','deathValue_right']).issubset(columns.values):
+				deathValue_left = row['deathValue_left']
+				deathValue_right = row['deathValue_right']
+				deathValue_left = deathValue_left if row['deathValue_left'] is not None else 0
+				deathValue_right = deathValue_right if row['deathValue_right'] is not None else 0
+				if deathValue_left <= deathValue_right:
+					return deathValue_right
 				else:
-					return row['deathValue_left']
-			elif ['deathValue'] in columns.values:
+					return deathValue_left
+			elif set(['deathValue']).issubset(columns.values):
 				return row['deathValue']
 			else:
 				return 0
@@ -579,10 +594,10 @@ class IdsrAppServer:
 					combinedDf = pd.merge(dfCaseClassification,dfCaseImmediateOutcome,on=['ou','ouname','disease','dateOfOnSet'],how='left').merge(dfTestResultClassification,on=['ou','ouname','disease','dateOfOnSet'],how='left').merge(dfTestResult,on=['ou','ouname','disease','dateOfOnSet'],how='left').merge(dfStatusOutcome,on=['ou','ouname','disease','dateOfOnSet'],how='left')
 					combinedDf.sort_values(['ouname','disease','dateOfOnSet'],ascending=[True,True,True])
 					combinedDf['dateOfOnSetWeek'] = pd.to_datetime(combinedDf['dateOfOnSet']).dt.strftime('%YW%V')
-					combinedDf['confirmedValue'] = combinedDf.apply(self.getCaseStatus,args=(combinedDf.columns),axis=1)
-					combinedDf['suspectedValue'] = combinedDf.apply(self.getCaseStatus,args=(combinedDf.columns),axis=1)
+					combinedDf['confirmedValue'] = combinedDf.apply(self.getCaseStatus,args=(combinedDf.columns,'CONFIRMED'),axis=1)
+					combinedDf['suspectedValue'] = combinedDf.apply(self.getCaseStatus,args=(combinedDf.columns,'SUSPECTED'),axis=1)
 
-					#combinedDf['deathValue'] = combinedDf.apply(self.getCaseStatus,args=([combinedDf.columns]),axis=1)
+					#combinedDf['deathValue'] = combinedDf.apply(self.getCaseStatus,args=(combinedDf.columns,'DEATH'),axis=1)
 
 					dfConfirmed = combinedDf.groupby(['ouname','ou','disease','dateOfOnSetWeek'])['confirmedValue'].agg(['sum']).reset_index()
 
@@ -664,16 +679,6 @@ class IdsrAppServer:
 		else:
 			print("No outbreaks/epidemics for " + diseaseMeta['disease'])
 			return dhis2Events
-	# Add DHIS2 UIDS to new epidemics
-	def assignUids(self,row=None,uids=None,column=None,epidemics=None):
-		currentRow = str(row[column])
-		print("Row",currentRow)
-		if row is not None:
-			if currentRow is None:
-				currentRow = uids[0]
-				del uids[0]
-		return currentRow
-
 
 	# Transform updated to DHIS2 JSON events format
 	# @param dataFrame df
@@ -880,7 +885,7 @@ class IdsrAppServer:
 						epiCodes = self.getHttpData(self.url,epiCodesFields,self.username,self.password,params=epiCodesParams)
 						if(epiCodes != 'HTTP_ERROR'):
 							epiCodesUids = epiCodes['codes']
-							newEpidemics['event'] = newEpidemics.apply(self.assignUids,args=(epiCodesUids,'event'),axis=1)
+							newEpidemics['event'] = epiCodesUids
 						else:
 							print("Failed to generated DHIS2 UID codes")
 					else:
@@ -890,9 +895,9 @@ class IdsrAppServer:
 					if updatedEpidemics.empty is True:
 						updatedEpidemics['dataValues'] = []
 					if updatedEpidemics.empty is not True:
-						updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'))
-						updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'))
-						updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'))
+						updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'),axis=1)
+						updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'),axis=1)
+						updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'),axis=1)
 						updatedEpidemics.drop(list(updatedEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
 						deleteColumns =  self.dropColumns(df=updatedEpidemics.columns,columns=['confirmedValue_left','suspectedValue_left','deathValue_left'])
 						updatedEpidemics.drop(columns=deleteColumns,inplace=True)
@@ -980,7 +985,7 @@ class IdsrAppServer:
 						epiCodes = self.getHttpData(self.url,epiCodesFields,self.username,self.password,params=epiCodesParams)
 						if(epiCodes != 'HTTP_ERROR'):
 							epiCodesUids = epiCodes['codes']
-							newEpidemics['event'] = newEpidemics.apply(self.assignUids,args=(epiCodesUids,'event'),axis=1)
+							newEpidemics['event'] = epiCodesUids
 						else:
 							print("Failed to generated DHIS2 UID codes")
 					else:
@@ -990,9 +995,9 @@ class IdsrAppServer:
 					if updatedEpidemics.empty is True:
 						updatedEpidemics['dataValues'] = []
 					if updatedEpidemics.empty is not True:
-						updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'))
-						updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'))
-						updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'))
+						updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'),axis=1)
+						updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'),axis=1)
+						updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'),axis=1)
 						updatedEpidemics.drop(list(updatedEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
 						deleteColumns = self.dropColumns(df=updatedEpidemics.columns,columns=['confirmedValue_left','suspectedValue_left','deathValue_left'])
 						updatedEpidemics.drop(columns=deleteColumns,inplace=True)
@@ -1081,7 +1086,7 @@ class IdsrAppServer:
 						epiCodes = self.getHttpData(self.url,epiCodesFields,self.username,self.password,params=epiCodesParams)
 						if(epiCodes != 'HTTP_ERROR'):
 							epiCodesUids = epiCodes['codes']
-							newEpidemics['event'] = newEpidemics.apply(self.assignUids,args=(epiCodesUids,'event'),axis=1)
+							newEpidemics['event'] = epiCodesUids
 						else:
 							print("Failed to generated DHIS2 UID codes")
 					else:
@@ -1091,9 +1096,9 @@ class IdsrAppServer:
 					if updatedEpidemics.empty is True:
 						updatedEpidemics['dataValues'] = []
 					if updatedEpidemics.empty is not True:
-						updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'))
-						updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'))
-						updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'))
+						updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'),axis=1)
+						updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'),axis=1)
+						updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'),axis=1)
 						updatedEpidemics.drop(list(updatedEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
 						deleteColumns =  self.dropColumns(df=updatedEpidemics.columns,columns=['confirmedValue_left','suspectedValue_left','deathValue_left'])
 						updatedEpidemics.drop(columns=deleteColumns,inplace=True)
