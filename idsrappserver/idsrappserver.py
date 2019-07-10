@@ -318,7 +318,7 @@ class IdsrAppServer:
 	# Detect using aggregated indicators
 	# Confirmed, Deaths,Suspected
 	def detectOnAggregateIndicators(self,aggData,diseaseMeta,epidemics,ou,periods,mPeriods,nPeriods):
-		dhis2Events = []
+		dhis2Events = pd.DataFrame()
 		detectionLevel = int(diseaseMeta['detectionLevel'])
 		reportingLevel = int(diseaseMeta['reportingLevel'])
 		m=mPeriods
@@ -377,6 +377,8 @@ class IdsrAppServer:
 				checkEpidemic = "mean_current_cases >= mean20std_mn_cases & mean_current_cases != 0 & mean20std_mn_cases != 0"
 
 				df.query(checkEpidemic,inplace=True)
+				if df.empty is True:
+					df['alert'] = "false"
 				if df.empty is not True:
 					df['epidemic'] = 'true'
 					# Filter out those greater or equal to threshold
@@ -391,20 +393,10 @@ class IdsrAppServer:
 					df['epicode'] = df.apply(self.generateCode,args=('orgUnitCode','E','_'), axis=1)
 					closedQuery = "df['epidemic'] == 'true' && df['active'] == 'true' && df['reminder'] == 'false'"
 					closedVigilanceQuery = "df['epidemic'] == 'true' && df['active'] == 'true' && df['reminder'] == 'true'"
-					#df['status'] = np.where(closedQuery,'Closed',np.where(closedVigilanceQuery,"Closed Vigilance","Confirmed"))
-					#df['active'] = np.where(closedQuery,'false',np.where(closedVigilanceQuery,"true","true"))
-					#df['closeDate'] = np.where(closedQuery,self.today,np.where(closedVigilanceQuery,df['closeDate'],""))
-					#df['reminderSent'] = np.where(closedQuery,'false',np.where(closedVigilanceQuery,"true","false"))
-					#df['dateReminderSent'] = np.where(closedQuery,'',np.where(closedVigilanceQuery,self.today,""))
-					df[['status','active','closeDate','reminderSent','dateReminderSent']] = df.apply(self.getEpidemicDetails,axis=1)
-					#df['reminderDate'] = df['dateReminderSent']
-					df.to_csv('testidsr.csv',sep=",",encoding='utf-8')
 
-					#### Check epidemic closure
-					# df = self.getQueryValue(df,"epidemic == 'true' & active == 'true' & reminder == 'false'",'status')
+					df[['status','active','closeDate','reminderSent','dateReminderSent']] = df.apply(self.getEpidemicDetails,axis=1)
 			else:
 				# No data for cases found
-				# dhis2Events = {'alerts':[],'events':[]}
 				pass
 			return df
 		else:
@@ -561,7 +553,7 @@ class IdsrAppServer:
 	# detect self.epidemics
 	# Confirmed, Deaths,Suspected
 	def detectBasedOnProgramIndicators(self,caseEvents,diseaseMeta,orgUnits,type,dateData):
-		dhis2Events = []
+		dhis2Events = pd.DataFrame()
 		detectionLevel = int(diseaseMeta['detectionLevel'])
 		reportingLevel = int(diseaseMeta['reportingLevel'])
 		if(caseEvents != 'HTTP_ERROR'):
@@ -659,21 +651,9 @@ class IdsrAppServer:
 				alertQuery = (aggDf['confirmedValue'] < aggDf['epiThreshold']) & (aggDf['suspectedValue'].astype(np.int64) >= aggDf['alertThreshold'].astype(np.int64)) & (aggDf['endDate'] > self.today)
 				aggDf['alert'] = np.where(alertQuery,'true','false')
 
-				# Filter out those greater or equal to threshold
-				trialname = diseaseMeta['disease'] + "_dftrial.csv"
-				#aggDf.to_csv(trialname, sep=',', encoding='utf-8')
-
-				#df_epidemics = aggDf[aggDf['epidemic'] == 'true']
-				#df_alert = aggDf[aggDf['alert'] == 'true']
-				#atrialname = diseaseMeta['disease'] + "_dftrial_alert.csv"
-				#df_alert.to_csv(atrialname, sep=',', encoding='utf-8')
-				# lab confirmed = true
-				# type of emergency = outbreak or other
-
 				return aggDf
 			else:
 				# No data for cases found
-				#dhis2Events = {'alerts':[],'events':[]}
 				pass
 				return dhis2Events
 		else:
@@ -780,6 +760,84 @@ class IdsrAppServer:
 		else:
 			deleteColumns =[]
 		return deleteColumns
+	# Get epidemics
+	def getEpidemics(self,programConfig=None,detectedAggEpidemics=None,detectedMergedAlertsMessage=None,dfEpidemics=None,messageColumns=None,alertColumns=None,type='EPIDEMIC'):
+		dfEpidemics['period'] =pd.to_datetime(dfEpidemics['firstCaseDate']).dt.strftime('%YW%V')
+		if detectedAggEpidemics.empty:
+			print("Nothing to update or detect. Proceeding to next disease")
+			return
+		allAggEpidemics = self.getDfUpdatedEpidemics(dfEpidemics,detectedAggEpidemics,mergeColumns=['orgUnit','disease','period'],how='outer',track=True,epidemic=False)
+		remindersQuery = "{}{}{}'".format("reminderDate", "=='", self.today)
+		# New epidemics
+		newEpidemics = allAggEpidemics.query("_merge == 'right_only'")
+		newEpidemics.drop(list(newEpidemics.filter(regex = '_left')), axis = 1, inplace = True)
+		newEpidemics.columns = newEpidemics.columns.str.replace('_right', '')
+		# Existing epidemics and not updated
+		existsEpidemics = allAggEpidemics.query("_merge == 'left_only'")
+		existsEpidemics.drop(list(existsEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
+		existsEpidemics.columns = existsEpidemics.columns.str.replace('_left', '')
+		# Updated epidemics
+		updatedEpidemics =allAggEpidemics.query("_merge == 'both'")
+
+
+		print("Number of New Epidemics ", len(newEpidemics.index))
+		if( len(newEpidemics.index) > 0):
+			epiCodesFields = "system/id"
+			epiCodesParams = { "limit" : len(newEpidemics.index) }
+
+			epiCodes = self.getHttpData(self.url,epiCodesFields,self.username,self.password,params=epiCodesParams)
+			if(epiCodes != 'HTTP_ERROR'):
+				epiCodesUids = epiCodes['codes']
+				newEpidemics['event'] = epiCodesUids
+			else:
+				print("Failed to generated DHIS2 UID codes")
+		else:
+			print("Exiting no new outbreaks detected")
+		print("Detecting and updating Outbreaks .... ")
+		config =programConfig['reportingProgram']['programStage']['dataElements']
+		if updatedEpidemics.empty is True:
+			if type == 'EPIDEMIC':
+				updatedEpidemics['dataValues'] = []
+			else:
+				pass
+		if updatedEpidemics.empty is not True:
+			if type == 'EPIDEMIC':
+				updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'),axis=1)
+				updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'),axis=1)
+				updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'),axis=1)
+				updatedEpidemics.drop(list(updatedEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
+				deleteColumns = self.dropColumns(df=updatedEpidemics.columns,columns=['confirmedValue_left','suspectedValue_left','deathValue_left'])
+				updatedEpidemics.drop(columns=deleteColumns,inplace=True)
+				updatedEpidemics.columns = updatedEpidemics.columns.str.replace('_left', '')
+				updatedEpidemics['dataValues'] = updatedEpidemics.apply( self.createEventDatavalues,args=(config,updatedEpidemics.columns),axis=1);
+			else:
+				pass
+
+		if newEpidemics.empty is True:
+			if type == 'EPIDEMIC':
+				newEpidemics['dataValues'] = []
+			else:
+				pass
+		if newEpidemics.empty is not True:
+			if type == 'EPIDEMIC':
+				newEpidemics['eventDate'] = newEpidemics['firstCaseDate']
+				newEpidemics['status'] = 'COMPLETED'
+				newEpidemics['program'] = str(programConfig['reportingProgram']['id'])
+				newEpidemics['programStage'] = str(programConfig['reportingProgram']['programStage']['id'])
+				newEpidemics['storedBy'] = 'idsr'
+				newEpidemics['epicode']=newEpidemics.apply(self.trackEpidemics,args=(dfEpidemics,'epicode',['disease','orgUnit'],'orgUnitCode'),axis=1)
+				newEpidemics['dataValues'] = newEpidemics.apply( self.createEventDatavalues,args=(config,newEpidemics.columns),axis=1);
+				detectedNewEpidemicsAlertsMessage = newEpidemics.filter(alertColumns)
+				detectedNewEpidemicsAlertsMessage[messageColumns] = detectedNewEpidemicsAlertsMessage.apply(self.createMessage,args=(diseaseMeta['notifiableUserGroups'],'EPIDEMIC'),axis=1)
+			else:
+				detectedNewEpidemicsAlertsMessage = newEpidemics.filter(alertColumns)
+				detectedNewEpidemicsAlertsMessage[messageColumns] = detectedNewEpidemicsAlertsMessage.apply(self.createMessage,args=(diseaseMeta['notifiableUserGroups'],'ALERT'),axis=1)
+			#mergedAlerts = pd.concat([detectedNewEpidemicsAlerts],sort=False)
+			detectedMergedAlertsMessage = detectedMergedAlertsMessage.append(detectedNewEpidemicsAlerts)
+		# Merge updated, new and existing epidemics
+		mergedEpidemics = pd.concat([existsEpidemics,updatedEpidemics,newEpidemics],sort=False)
+		return [mergedEpidemics,detectedMergedAlertsMessage]
+
 	def iterateDiseases(self,diseasesMeta,epidemics,alerts,type):
 		newUpdatedEpis = []
 		existingAlerts = alerts
@@ -804,6 +862,8 @@ class IdsrAppServer:
 		detectedMergedEpidemics = pd.DataFrame()
 		# Combine Existing,new and updated alerts
 		detectedMergedAlerts = pd.DataFrame()
+		# New alerts messages
+		detectedMergedAlertsMessage = pd.DataFrame()
 		alertColumns = ['disease','orgUnit','orgUnitName','reportingOrgUnit','reportingOrgUnitName']
 		messageColumns = ['subject','text','users','organisationUnits']
 
@@ -847,82 +907,19 @@ class IdsrAppServer:
 					orgUnits = epiReportingOrgUnit['organisationUnits']
 					dateData = self.getHttpData(self.url,teiFields,self.username,self.password,params=teiParams)
 					detectedEpidemics = self.detectBasedOnProgramIndicators(caseEvents,diseaseMeta,orgUnits,type,dateData)
+					detectedAggAlerts = self.queryValue(detectedAggEpidemics,"alert == 'true'")
 					# Creating epidemics alerts
+					mergedAlerts =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggAlerts,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfAlerts,messageColumns=messageColumns,alertColumns=alertColumns,type='ALERT')
+					if mergedAlerts is None:
+						return
+					detectedMergedAlertsMessage = mergedAlerts[1]
+					detectedMergedAlerts =  detectedMergedAlerts.append(mergedAlerts[0])
 					# Creating threshold alerts
-					detectedAggAlerts = self.queryValue(detectedEpidemics,"alert == 'true'")
-					#dfAlerts = self.createDataFrame(alerts)
-					# Get Existing (_merge=left_only), new (_merge=right_only) and updated alerts (_merge=both)
-
-					newAggAlerts = self.getDfUpdatedEpidemics(dfAlerts,detectedAggAlerts,mergeColumns=['orgUnit','disease','period'],how='outer',track=True,epidemic=False)
-					# Use inner join to get updated only
-					newAlerts = newAggAlerts[newAggAlerts["_merge"] == "right_only"]
-					dfAlerts.to_csv('dfalerts.csv',sep=",",encoding='utf-8')
-					print("Number of alerts ",len(newAlerts))
-					#existingAlerts.extend(newAggAlerts)
-					# Get Uids for identifying epidemics
-					#dfEpidemics = self.createDataFrame(epidemics)
-					dfEpidemics['period'] =pd.to_datetime(dfEpidemics['firstCaseDate']).dt.strftime('%YW%V')
-					allAggEpidemics = self.getDfUpdatedEpidemics(dfEpidemics,detectedAggEpidemics,mergeColumns=['orgUnit','disease','period'],how='outer',track=True,epidemic=False)
-					remindersQuery = "{}{}{}'".format("reminderDate", "=='", self.today)
-					# New epidemics
-					newEpidemics = allAggEpidemics.query("_merge == 'right_only'")
-					newEpidemics.drop(list(newEpidemics.filter(regex = '_left')), axis = 1, inplace = True)
-					newEpidemics.columns = newEpidemics.columns.str.replace('_right', '')
-
-					newEpidemics.to_csv('dfNewEpidemics.csv',sep=",",encoding='utf-8')
-					# Existing epidemics and not updated
-					existsEpidemics = allAggEpidemics.query("_merge == 'left_only'")
-					existsEpidemics.drop(list(existsEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
-					existsEpidemics.columns = existsEpidemics.columns.str.replace('_left', '')
-					# Updated epidemics
-					updatedEpidemics =allAggEpidemics.query("_merge == 'both'")
-
-					print("Number of New Epidemics ", len(newEpidemics.index))
-					if( len(newEpidemics.index) > 0):
-						epiCodesFields = "system/id"
-						epiCodesParams = { "limit" : len(newEpidemics.index) }
-
-						epiCodes = self.getHttpData(self.url,epiCodesFields,self.username,self.password,params=epiCodesParams)
-						if(epiCodes != 'HTTP_ERROR'):
-							epiCodesUids = epiCodes['codes']
-							newEpidemics['event'] = epiCodesUids
-						else:
-							print("Failed to generated DHIS2 UID codes")
-					else:
-						print("Exiting no new outbreaks detected")
-					print("Detecting and updating Outbreaks .... ")
-					config =programConfig['reportingProgram']['programStage']['dataElements']
-					if updatedEpidemics.empty is True:
-						updatedEpidemics['dataValues'] = []
-					if updatedEpidemics.empty is not True:
-						updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'),axis=1)
-						updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'),axis=1)
-						updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'),axis=1)
-						updatedEpidemics.drop(list(updatedEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
-						deleteColumns =  self.dropColumns(df=updatedEpidemics.columns,columns=['confirmedValue_left','suspectedValue_left','deathValue_left'])
-						updatedEpidemics.drop(columns=deleteColumns,inplace=True)
-						updatedEpidemics.columns = updatedEpidemics.columns.str.replace('_left', '')
-						updatedEpidemics['dataValues'] = updatedEpidemics.apply( self.createEventDatavalues,args=(config,updatedEpidemics.columns),axis=1)
-
-					if newEpidemics.empty is True:
-						newEpidemics['dataValues'] = []
-					if newEpidemics.empty is not True:
-						newEpidemics['eventDate'] = newEpidemics['firstCaseDate']
-						newEpidemics['status'] = 'COMPLETED'
-						newEpidemics['program'] = str(programConfig['reportingProgram']['id'])
-						newEpidemics['programStage'] = str(programConfig['reportingProgram']['programStage']['id'])
-						newEpidemics['storedBy'] = 'idsr'
-						newEpidemics['epicode']=newEpidemics.apply(self.trackEpidemics,args=(dfEpidemics,'epicode',['disease','orgUnit'],'orgUnitCode'),axis=1)
-						newEpidemics['dataValues'] = newEpidemics.apply( self.createEventDatavalues,args=(config,newEpidemics.columns),axis=1)
-						detectedNewEpidemicsAlerts = newEpidemics.filter(alertColumns)
-						detectedNewEpidemicsAlerts[messageColumns] = detectedNewEpidemicsAlerts.apply(self.createMessage,args=(diseaseMeta['notifiableUserGroups'],'EPIDEMIC'),axis=1)
-						detectedNewEpidemicsAlerts = newEpidemics.filter(alertColumns)
-						detectedNewEpidemicsAlerts[messageColumns] = detectedNewEpidemicsAlerts.apply(self.createMessage,args=(diseaseMeta['notifiableUserGroups'],'EPIDEMIC'),axis=1)
-						#mergedAlerts = pd.concat([detectedNewEpidemicsAlerts],sort=False)
-						detectedMergedAlerts = detectedMergedAlerts.append(detectedNewEpidemicsAlerts)
-					# Merge updated, new and existing epidemics
-					mergedEpidemics = pd.concat([existsEpidemics,updatedEpidemics,newEpidemics],sort=False)
-					detectedMergedEpidemics = detectedMergedEpidemics.append(mergedEpidemics)
+					mergedEpidemics =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggEpidemics,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfEpidemics,messageColumns=messageColumns,alertColumns=alertColumns)
+					if mergedEpidemics is None:
+						return
+					detectedMergedEpidemics = detectedMergedEpidemics.append(mergedEpidemics[0])
+					detectedMergedAlertsMessage = mergedEpidemics[1]
 					print ("Finished creating Outbreaks for %s" %diseaseMeta['disease'])
 					# Reminders
 					#reminders = self.queryValue(allAggEpidemics,remindersQuery)
@@ -938,7 +935,6 @@ class IdsrAppServer:
 				# periods are aggregate generated
 				aggPeriod = self.createAggThresholdPeriod(mPeriods,nPeriods,'SEASONAL')
 				aggPeriods = piSeparator.join(aggPeriod)
-				print("periods",aggPeriods)
 
 				aggParams = {"dimension": ["dx:"+ piIndicators,"ou:" + ouLevel,"pe:" + aggPeriods],"displayProperty":"NAME","tableLayout":"true","columns":"dx;pe","rows":"ou","skipMeta":"false","hideEmptyRows":"true","skipRounding":"false","showHierarchy":"true"}
 
@@ -948,79 +944,20 @@ class IdsrAppServer:
 					aggData = aggIndicators
 					aggOrgUnit = epiReportingOrgUnit['organisationUnits']
 					detectedAggEpidemics = self.detectOnAggregateIndicators(aggData,diseaseMeta,epidemics,aggOrgUnit,aggPeriod,mPeriods,nPeriods)
-					# Creating epidemics alerts
-					# Creating threshold alerts
+					detectedAggEpidemics.to_csv('detectedAggEpidemics.csv',encoding='utf-8')
 					detectedAggAlerts = self.queryValue(detectedAggEpidemics,"alert == 'true'")
-					#dfAlerts = self.createDataFrame(alerts)
-					# Get Existing (_merge=left_only), new (_merge=right_only) and updated alerts (_merge=both)
-
-					newAggAlerts = self.getDfUpdatedEpidemics(dfAlerts,detectedAggAlerts,mergeColumns=['orgUnit','disease','period'],how='outer',track=True,epidemic=False)
-					# Use inner join to get updated only
-					newAlerts = newAggAlerts[newAggAlerts["_merge"] == "right_only"]
-					dfAlerts.to_csv('dfalerts.csv',sep=",",encoding='utf-8')
-					print("Number of alerts ",len(newAlerts))
-					#existingAlerts.extend(newAggAlerts)
-					# Get Uids for identifying epidemics
-					#dfEpidemics = self.createDataFrame(epidemics)
-					dfEpidemics['period'] =pd.to_datetime(dfEpidemics['firstCaseDate']).dt.strftime('%YW%V')
-					allAggEpidemics = self.getDfUpdatedEpidemics(dfEpidemics,detectedAggEpidemics,mergeColumns=['orgUnit','disease','period'],how='outer',track=True,epidemic=False)
-					remindersQuery = "{}{}{}'".format("reminderDate", "=='", self.today)
-					# New epidemics
-					newEpidemics = allAggEpidemics.query("_merge == 'right_only'")
-					newEpidemics.drop(list(newEpidemics.filter(regex = '_left')), axis = 1, inplace = True)
-					newEpidemics.columns = newEpidemics.columns.str.replace('_right', '')
-					# Existing epidemics and not updated
-					existsEpidemics = allAggEpidemics.query("_merge == 'left_only'")
-					existsEpidemics.drop(list(existsEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
-					existsEpidemics.columns = existsEpidemics.columns.str.replace('_left', '')
-					# Updated epidemics
-					updatedEpidemics =allAggEpidemics.query("_merge == 'both'")
-
-
-					print("Number of New Epidemics ", len(newEpidemics.index))
-					if( len(newEpidemics.index) > 0):
-						epiCodesFields = "system/id"
-						epiCodesParams = { "limit" : len(newEpidemics.index) }
-
-						epiCodes = self.getHttpData(self.url,epiCodesFields,self.username,self.password,params=epiCodesParams)
-						if(epiCodes != 'HTTP_ERROR'):
-							epiCodesUids = epiCodes['codes']
-							newEpidemics['event'] = epiCodesUids
-						else:
-							print("Failed to generated DHIS2 UID codes")
-					else:
-						print("Exiting no new outbreaks detected")
-					print("Detecting and updating Outbreaks .... ")
-					config =programConfig['reportingProgram']['programStage']['dataElements']
-					if updatedEpidemics.empty is True:
-						updatedEpidemics['dataValues'] = []
-					if updatedEpidemics.empty is not True:
-						updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'),axis=1)
-						updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'),axis=1)
-						updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'),axis=1)
-						updatedEpidemics.drop(list(updatedEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
-						deleteColumns = self.dropColumns(df=updatedEpidemics.columns,columns=['confirmedValue_left','suspectedValue_left','deathValue_left'])
-						updatedEpidemics.drop(columns=deleteColumns,inplace=True)
-						updatedEpidemics.columns = updatedEpidemics.columns.str.replace('_left', '')
-						updatedEpidemics['dataValues'] = updatedEpidemics.apply( self.createEventDatavalues,args=(config,updatedEpidemics.columns),axis=1);
-
-					if newEpidemics.empty is True:
-						newEpidemics['dataValues'] = []
-					if newEpidemics.empty is not True:
-						newEpidemics['eventDate'] = newEpidemics['firstCaseDate']
-						newEpidemics['status'] = 'COMPLETED'
-						newEpidemics['program'] = str(programConfig['reportingProgram']['id'])
-						newEpidemics['programStage'] = str(programConfig['reportingProgram']['programStage']['id'])
-						newEpidemics['storedBy'] = 'idsr'
-						newEpidemics['epicode']=newEpidemics.apply(self.trackEpidemics,args=(dfEpidemics,'epicode',['disease','orgUnit'],'orgUnitCode'),axis=1)
-						newEpidemics['dataValues'] = newEpidemics.apply( self.createEventDatavalues,args=(config,newEpidemics.columns),axis=1);
-						detectedNewEpidemicsAlerts = newEpidemics.filter(alertColumns)
-						detectedNewEpidemicsAlerts[messageColumns] = detectedNewEpidemicsAlerts.apply(self.createMessage,args=(diseaseMeta['notifiableUserGroups'],'EPIDEMIC'),axis=1)
-						#mergedAlerts = pd.concat([detectedNewEpidemicsAlerts],sort=False)
-						detectedMergedAlerts = detectedMergedAlerts.append(detectedNewEpidemicsAlerts)
-					# Merge updated, new and existing epidemics
-					mergedEpidemics = pd.concat([existsEpidemics,updatedEpidemics,newEpidemics],sort=False)
-					detectedMergedEpidemics = detectedMergedEpidemics.append(mergedEpidemics)
+					# Creating epidemics alerts
+					mergedAlerts =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggAlerts,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfAlerts,messageColumns=messageColumns,alertColumns=alertColumns,type='ALERT')
+					if mergedAlerts is None:
+						return
+					detectedMergedAlertsMessage = mergedAlerts[1]
+					detectedMergedAlerts =  detectedMergedAlerts.append(mergedAlerts[0])
+					# Creating threshold alerts
+					mergedEpidemics =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggEpidemics,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfEpidemics,messageColumns=messageColumns,alertColumns=alertColumns)
+					if mergedEpidemics is None:
+						return
+					detectedMergedEpidemics = detectedMergedEpidemics.append(mergedEpidemics[0])
+					detectedMergedAlertsMessage = mergedEpidemics[1]
 					print ("Finished creating Outbreaks for %s" %diseaseMeta['disease'])
 					# Reminders
 					#reminders = self.queryValue(allAggEpidemics,remindersQuery)
@@ -1050,78 +987,19 @@ class IdsrAppServer:
 					aggData = aggIndicators
 					aggOrgUnit = epiReportingOrgUnit['organisationUnits']
 					detectedAggEpidemics = self.detectOnAggregateIndicators(aggData,diseaseMeta,epidemics,aggOrgUnit,aggPeriod,mPeriods,nPeriods)
-					# Creating epidemics alerts
-					# Creating threshold alerts
 					detectedAggAlerts = self.queryValue(detectedAggEpidemics,"alert == 'true'")
-					#dfAlerts = self.createDataFrame(alerts)
-					# Get Existing (_merge=left_only), new (_merge=right_only) and updated alerts (_merge=both)
-
-					newAggAlerts = self.getDfUpdatedEpidemics(dfAlerts,detectedAggAlerts,mergeColumns=['orgUnit','disease','period'],how='outer',track=True,epidemic=False)
-					# Use inner join to get updated only
-					newAlerts = newAggAlerts[newAggAlerts["_merge"] == "right_only"]
-					dfAlerts.to_csv('dfalerts.csv',sep=",",encoding='utf-8')
-					print("Number of alerts ",len(newAlerts))
-					#existingAlerts.extend(newAggAlerts)
-					# Get Uids for identifying epidemics
-					#dfEpidemics = self.createDataFrame(epidemics)
-					dfEpidemics['period'] =pd.to_datetime(dfEpidemics['firstCaseDate']).dt.strftime('%YW%V')
-					allAggEpidemics = self.getDfUpdatedEpidemics(dfEpidemics,detectedAggEpidemics,mergeColumns=['orgUnit','disease','period'],how='outer',track=True,epidemic=False)
-					remindersQuery = "{}{}{}'".format("reminderDate", "=='", self.today)
-					# New epidemics
-					newEpidemics = allAggEpidemics.query("_merge == 'right_only'")
-					newEpidemics.drop(list(newEpidemics.filter(regex = '_left')), axis = 1, inplace = True)
-
-					newEpidemics.columns = newEpidemics.columns.str.replace('_right', '')
-					# Existing epidemics and not updated
-					existsEpidemics = allAggEpidemics.query("_merge == 'left_only'")
-					existsEpidemics.drop(list(existsEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
-					existsEpidemics.columns = existsEpidemics.columns.str.replace('_left', '')
-					# Updated epidemics
-					updatedEpidemics =allAggEpidemics.query("_merge == 'both'")
-					print("Number of New Epidemics ", len(newEpidemics.index))
-					if( len(newEpidemics.index) > 0):
-						epiCodesFields = "system/id"
-						epiCodesParams = { "limit" : len(newEpidemics.index) }
-
-						epiCodes = self.getHttpData(self.url,epiCodesFields,self.username,self.password,params=epiCodesParams)
-						if(epiCodes != 'HTTP_ERROR'):
-							epiCodesUids = epiCodes['codes']
-							newEpidemics['event'] = epiCodesUids
-						else:
-							print("Failed to generated DHIS2 UID codes")
-					else:
-						print("Exiting no new outbreaks detected")
-					print("Detecting and updating Outbreaks .... ")
-					config =programConfig['reportingProgram']['programStage']['dataElements']
-					if updatedEpidemics.empty is True:
-						updatedEpidemics['dataValues'] = []
-					if updatedEpidemics.empty is not True:
-						updatedEpidemics['confirmedValue']= updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'CONFIRMED'),axis=1)
-						updatedEpidemics['suspectedValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'SUSPECTED'),axis=1)
-						updatedEpidemics['deathValue']=updatedEpidemics.apply(self.getCaseStatus,args=(updatedEpidemics.columns,'DEATH'),axis=1)
-						updatedEpidemics.drop(list(updatedEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
-						deleteColumns =  self.dropColumns(df=updatedEpidemics.columns,columns=['confirmedValue_left','suspectedValue_left','deathValue_left'])
-						updatedEpidemics.drop(columns=deleteColumns,inplace=True)
-						updatedEpidemics.columns = updatedEpidemics.columns.str.replace('_left', '')
-						updatedEpidemics['dataValues'] = updatedEpidemics.apply( self.createEventDatavalues,args=(config,updatedEpidemics.columns),axis=1)
-
-					if newEpidemics.empty is True:
-						newEpidemics['dataValues'] = []
-					if newEpidemics.empty is not True:
-						newEpidemics['eventDate'] = newEpidemics['firstCaseDate']
-						newEpidemics['status'] = 'COMPLETED'
-						newEpidemics['program'] = str(programConfig['reportingProgram']['id'])
-						newEpidemics['programStage'] = str(programConfig['reportingProgram']['programStage']['id'])
-						newEpidemics['storedBy'] = 'idsr'
-						newEpidemics['epicode']=newEpidemics.apply(self.trackEpidemics,args=(dfEpidemics,'epicode',['disease','orgUnit'],'orgUnitCode'),axis=1)
-						newEpidemics['dataValues'] = newEpidemics.apply( self.createEventDatavalues,args=(config,newEpidemics.columns),axis=1)
-						detectedNewEpidemicsAlerts = newEpidemics.filter(alertColumns)
-						detectedNewEpidemicsAlerts[messageColumns] = detectedNewEpidemicsAlerts.apply(self.createMessage,args=(diseaseMeta['notifiableUserGroups'],'EPIDEMIC'),axis=1)
-						#mergedAlerts = pd.concat([detectedNewEpidemicsAlerts],sort=False)
-						detectedMergedAlerts = detectedMergedAlerts.append(detectedNewEpidemicsAlerts)
-					# Merge updated,new and existing epidemics
-					mergedEpidemics = pd.concat([existsEpidemics,updatedEpidemics,newEpidemics],sort=False)
-					detectedMergedEpidemics = detectedMergedEpidemics.append(mergedEpidemics)
+					# Creating epidemics alerts
+					mergedAlerts =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggAlerts,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfAlerts,messageColumns=messageColumns,alertColumns=alertColumns,type='ALERT')
+					if mergedAlerts is None:
+						return
+					detectedMergedAlertsMessage = mergedAlerts[1]
+					detectedMergedAlerts =  detectedMergedAlerts.append(mergedAlerts[0])
+					# Creating threshold alerts
+					mergedEpidemics =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggEpidemics,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfEpidemics,messageColumns=messageColumns,alertColumns=alertColumns)
+					if mergedEpidemics is None:
+						return
+					detectedMergedEpidemics = detectedMergedEpidemics.append(mergedEpidemics[0])
+					detectedMergedAlertsMessage = mergedEpidemics[1]
 					print ("Finished creating Outbreaks for %s" %diseaseMeta['disease'])
 
 					# Reminders
@@ -1139,7 +1017,6 @@ class IdsrAppServer:
 		epidemicsColumns = ["suspectedValue","confirmedValue","deathValue", "period", "firstCaseDate","lastCaseDate","endDate","closeDate","dateReminderSent","reminderSent","epicode","dataValues","status","disease","orgUnit","orgUnitName","orgUnitCode","reportingOrgUnit", "reportingOrgUnitName","event","program","programStage","incubationDays","storedBy","eventDate","active","updated"]
 		dhis2Events = detectedMergedEpidemics.filter(eventColumns)
 		mergedEpidemicsEvents = detectedMergedEpidemics.filter(epidemicsColumns)
-		print(dhis2Events.head())
 		events = {'events': json.loads(dhis2Events.to_json(orient='records',date_format='iso'))}
 		print("Updating epidemics in the datastore online")
 		epiUpdateDataStoreEndPoint  = 'dataStore/' + self.dataStore + '/epidemics'
@@ -1148,9 +1025,12 @@ class IdsrAppServer:
 		epiUpdateEventEndPoint  = 'events?importStrategy=CREATE_AND_UPDATE'
 		self.postJsonData(self.url,epiUpdateEventEndPoint,self.username,self.password,events)
 		print ("Finished creating Outbreaks")
-		print("Save alerts in the datastore online",len(existingAlerts))
+		print("Sending alerts")
+		messages = {'messageConversations': json.loads(detectedMergedAlertsMessage.to_json(orient='records')) }
+		self.sendSmsAndEmailMessage(messages)
+		print("Save alerts in the datastore online")
 		epiUpdateDataStoreEndPointAlert  = 'dataStore/' + self.dataStore + '/alerts'
-		self.updateJsonData(self.url,epiUpdateDataStoreEndPointAlert,self.username,self.password,existingAlerts)
+		self.updateJsonData(self.url,epiUpdateDataStoreEndPointAlert,self.username,self.password,json.loads(detectedMergedAlerts.to_json(orient='records',date_format='iso')))
 
 		return "Done processing"
 
