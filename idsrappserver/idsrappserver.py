@@ -30,28 +30,20 @@ class IdsrAppServer:
 		self.url = ""
 		self.username = ''
 		self.password = ''
-		# orgUnits
-		self.rootUid = 'Hjw70Lodtf2'
 
 		# programs
-		self.programUid = 'U86iDWxDek8'
-		self.outbreakProgram = 'y9LMXyKYXSI'
-		# Program Stages
-		self.labResultStage = 'cYEsxIe5jxL'
-		self.patientStatusStage = 'M2sHSxP9W7G'
-		self.caseMonitoringStage = ''
+		self.programUid = ''
+		self.outbreakProgram = ''
+
 
 		# TE Attributes
-		self.dateOfOnsetUid = 'adJ527HOTea'
-		self.conditionOrDiseaseUid = 'uOTHyxNv2W4'
-		self.patientStatusOutcome = 'xGUYkoLv0oN'
-		self.regPatientStatusOutcome = 'i6A3z9QQEBt'
-		self.caseClassification = 'bt06ynPCyFd'
-		self.testResult='kSvvTuSoUhy'
-		self.testResultClassification='Rl2G8xoVczk'
-
-		# Lab Result Stage Data Elements
-		self.newConditionOrDiseaseUid = ""
+		self.dateOfOnsetUid = ''
+		self.conditionOrDiseaseUid = ''
+		self.patientStatusOutcome = ''
+		self.regPatientStatusOutcome = ''
+		self.caseClassification = ''
+		self.testResult=''
+		self.testResultClassification=''
 
 		self.epidemics = {}
 
@@ -102,7 +94,7 @@ class IdsrAppServer:
 					pe = self.getIsoWeek(currentWDate)
 					periods.append(pe)
 		elif(type == 'NON_SEASONAL'):
-			for week in range(0,m,1):
+			for week in range(0,(m+1),1):
 				currentWDate = moment.date(currentDate).subtract(weeks=week).format('YYYY-MM-DD')
 				pe = self.getIsoWeek(currentWDate)
 				periods.append(pe)
@@ -144,6 +136,7 @@ class IdsrAppServer:
 	def updateJsonData(self,url,endPoint,username,password,data):
 		url = url+endPoint
 		submittedData = requests.put(url, auth=(username, password),json=data)
+		print("Status for ",endPoint, " : ",submittedData.status_code)
 		return submittedData
 
 	# Get array from Object Array
@@ -208,7 +201,10 @@ class IdsrAppServer:
 	def createMessage(self,outbreak=None,usergroups=[],type='EPIDEMIC'):
 		message = []
 		organisationUnits = []
-		users = usergroups
+		if usergroups is None:
+			users = []
+		if usergroups is not None:
+			users = usergroups
 		subject = ""
 		text = ""
 
@@ -236,6 +232,7 @@ class IdsrAppServer:
 	def sendSmsAndEmailMessage(self,message):
 		messageEndPoint = "messageConversations"
 		sentMessages = self.postJsonData(self.url,messageEndPoint,self.username,self.password,message)
+		print("Message sent: ",sentMessages)
 		return sentMessages
 		#return 0
 
@@ -334,17 +331,58 @@ class IdsrAppServer:
 				# print(df.iloc[:,(detectionLevel+4):(detectionLevel+4+m)])	# cases, deaths
 
 				### Make generic functions for math
-				df['mean_current_cases'] = df.iloc[:,(detectionLevel+4):(detectionLevel+3+m)].mean(axis=1)
-				df['mean_mn_cases'] = df.iloc[:,(detectionLevel+3+m):(detectionLevel+3+m+(m*n))].mean(axis=1)
-				df['stddev_mn_cases'] = df.iloc[:,(detectionLevel+3+m):(detectionLevel+3+m+(m*n))].std(axis=1)
-				df['mean20std_mn_cases'] = (df.mean_mn_cases + (2*df.stddev_mn_cases))
-				df['mean15std_mn_cases'] = (df.mean_mn_cases + (1.5*df.stddev_mn_cases))
+				if diseaseMeta['epiAlgorithm'] == "NON_SEASONAL":
+					# No need to do mean for current cases or deaths
+					df['mean_current_cases'] = df.iloc[:,(detectionLevel+4)]
+					df['mean_mn_cases'] = df.iloc[:,(detectionLevel+5):(detectionLevel+4+m)].mean(axis=1)
+					df['stddev_mn_cases'] = df.iloc[:,(detectionLevel+5):(detectionLevel+4+m)].std(axis=1)
+					df['mean20std_mn_cases'] = (df.mean_mn_cases + (2*df.stddev_mn_cases))
+					df['mean15std_mn_cases'] = (df.mean_mn_cases + (1.5*df.stddev_mn_cases))
 
-				df['mean_current_deaths'] = df.iloc[:,(detectionLevel+3+m+(m*n)):(detectionLevel+3+(2*m)+(m*n))].mean(axis=1)
-				df['mean_mn_deaths'] = df.iloc[:,(detectionLevel+3+(2*m)+(m*n)):dfColLength-1].mean(axis=1)
-				df['stddev_mn_deaths'] = df.iloc[:,(detectionLevel+3+(2*m)+(m*n)):dfColLength-1].std(axis=1)
-				df['mean20std_mn_deaths'] = (df.mean_mn_deaths + (2*df.stddev_mn_deaths))
-				df['mean15std_mn_deaths'] = (df.mean_mn_deaths + (1.5*df.stddev_mn_deaths))
+					df['mean_current_deaths'] = df.iloc[:,(detectionLevel+5+m)]
+					df['mean_mn_deaths'] = df.iloc[:,(detectionLevel+6+m):(detectionLevel+6+(2*m))].mean(axis=1)
+					df['stddev_mn_deaths'] = df.iloc[:,(detectionLevel+6+m):(detectionLevel+6+(2*m))].std(axis=1)
+					df['mean20std_mn_deaths'] = (df.mean_mn_deaths + (2*df.stddev_mn_deaths))
+					df['mean15std_mn_deaths'] = (df.mean_mn_deaths + (1.5*df.stddev_mn_deaths))
+					# periods
+					df['period']= periods[0]
+					startOfMidPeriod = periods[0].split('W')
+					startEndDates = self.getStartEndDates(int(startOfMidPeriod[0]),int(startOfMidPeriod[1]))
+					df['dateOfOnSetWeek'] = moment.date(startEndDates[0]).format('YYYY-MM-DD')
+					# First case date is the start date of the week where outbreak was detected
+					df['firstCaseDate'] = moment.date(startEndDates[0]).format('YYYY-MM-DD')
+					# Last case date is the end date of the week boundary.
+					df['lastCaseDate'] = moment.date(startEndDates[1]).format('YYYY-MM-DD')
+					df['endDate'] = ""
+					df['closeDate'] = moment.date(startEndDates[1]).add(days=int(diseaseMeta['incubationDays'])).format('YYYY-MM-DD')
+
+				if diseaseMeta['epiAlgorithm'] == "SEASONAL":
+					df['mean_current_cases'] = df.iloc[:,(detectionLevel+4):(detectionLevel+3+m)].mean(axis=1)
+					df['mean_mn_cases'] = df.iloc[:,(detectionLevel+3+m):(detectionLevel+3+m+(m*n))].mean(axis=1)
+					df['stddev_mn_cases'] = df.iloc[:,(detectionLevel+3+m):(detectionLevel+3+m+(m*n))].std(axis=1)
+					df['mean20std_mn_cases'] = (df.mean_mn_cases + (2*df.stddev_mn_cases))
+					df['mean15std_mn_cases'] = (df.mean_mn_cases + (1.5*df.stddev_mn_cases))
+
+					df['mean_current_deaths'] = df.iloc[:,(detectionLevel+3+m+(m*n)):(detectionLevel+3+(2*m)+(m*n))].mean(axis=1)
+					df['mean_mn_deaths'] = df.iloc[:,(detectionLevel+3+(2*m)+(m*n)):dfColLength-1].mean(axis=1)
+					df['stddev_mn_deaths'] = df.iloc[:,(detectionLevel+3+(2*m)+(m*n)):dfColLength-1].std(axis=1)
+					df['mean20std_mn_deaths'] = (df.mean_mn_deaths + (2*df.stddev_mn_deaths))
+					df['mean15std_mn_deaths'] = (df.mean_mn_deaths + (1.5*df.stddev_mn_deaths))
+					# Mid period for seasonal = mean of range(1,(m+1)) where m = number of periods
+					midPeriod = int(np.median(range(1,(m+1))))
+					df['period']= periods[midPeriod]
+					startOfMidPeriod = periods[midPeriod].split('W')
+					startEndDates = self.getStartEndDates(int(startOfMidPeriod[0]),int(startOfMidPeriod[1]))
+					df['dateOfOnSetWeek'] = moment.date(startEndDates[0]).format('YYYY-MM-DD')
+					# First case date is the start date of the week where outbreak was detected
+					df['firstCaseDate'] = moment.date(startEndDates[0]).format('YYYY-MM-DD')
+					# Last case date is the end date of the week boundary.
+					startOfEndPeriod = periods[(m+1)].split('W')
+					endDates = moment.date(startEndDates[0] + datetime.timedelta(days=(m-1)*(7/2))).format('YYYY-MM-DD')
+					df['lastCaseDate'] = moment.date(startEndDates[0] + datetime.timedelta(days=(m-1)*(7/2))).format('YYYY-MM-DD')
+					df['endDate'] = ""
+					df['closeDate'] = moment.date(startEndDates[0]).add(days=(m-1)*(7/2)+ int(diseaseMeta['incubationDays'])).format('YYYY-MM-DD')
+
 
 				df['reportingOrgUnitName'] = df.iloc[:,reportingLevel-1]
 				df['reportingOrgUnit'] = df.iloc[:,detectionLevel].apply(self.getOrgUnitValue,args=(ou,(reportingLevel-1),'id'))
@@ -352,30 +390,15 @@ class IdsrAppServer:
 				df['orgUnitName'] = df.iloc[:,detectionLevel+1]
 				df['orgUnitCode'] = df.iloc[:,detectionLevel+2]
 				df.to_csv('testidsrpre.csv',sep=",",encoding='utf-8')
-				dropColumns = [col for idx,col in enumerate(df.columns.values.tolist()) if idx > (detectionLevel+3) and idx < ((detectionLevel+4)+(2*(m*n)))]
+				dropColumns = [col for idx,col in enumerate(df.columns.values.tolist()) if idx > (detectionLevel+4) and idx < (detectionLevel+4+(3*m))]
 				df.drop(columns=dropColumns,inplace=True)
 				df['confirmedValue'] = df.loc[:,'mean_current_cases']
 				df['deathValue'] = df.loc[:,'mean_current_deaths']
 				df['suspectedValue'] = df.loc[:,'mean_current_cases']
-
-				# Mid period for seasonal = mean of range(1,(m+1)) where m = number of periods
-				midPeriod = int(np.median(range(1,(m+1))))
-				df['period']= periods[midPeriod]
-				startOfMidPeriod = periods[midPeriod].split('W')
-				startEndDates = self.getStartEndDates(int(startOfMidPeriod[0]),int(startOfMidPeriod[1]))
-				df['dateOfOnSetWeek'] = moment.date(startEndDates[0]).format('YYYY-MM-DD')
-				# First case date is the start date of the week where outbreak was detected
-				df['firstCaseDate'] = moment.date(startEndDates[0]).format('YYYY-MM-DD')
-				# Last case date is the end date of the week boundary.
-				startOfEndPeriod = periods[(m+1)].split('W')
-				endDates = moment.date(startEndDates[0] + datetime.timedelta(days=(m-1)*(7/2))).format('YYYY-MM-DD')
-				df['lastCaseDate'] = moment.date(startEndDates[0] + datetime.timedelta(days=(m-1)*(7/2))).format('YYYY-MM-DD')
-				df['endDate'] = ""
 				df['disease'] = diseaseMeta['disease']
 				df['incubationDays'] = diseaseMeta['incubationDays']
-				df['closeDate'] = moment.date(startEndDates[0]).add(days=(m-1)*(7/2)+ int(diseaseMeta['incubationDays'])).format('YYYY-MM-DD')
-				checkEpidemic = "mean_current_cases >= mean20std_mn_cases & mean_current_cases != 0 & mean20std_mn_cases != 0"
 
+				checkEpidemic = "mean_current_cases >= mean20std_mn_cases & mean_current_cases != 0 & mean20std_mn_cases != 0"
 				df.query(checkEpidemic,inplace=True)
 				if df.empty is True:
 					df['alert'] = "false"
@@ -383,8 +406,6 @@ class IdsrAppServer:
 					df['epidemic'] = 'true'
 					# Filter out those greater or equal to threshold
 					df = df[df['epidemic'] == 'true']
-					df['closeDate'] = moment.date(startEndDates[0]).add(days=(m-1)*(7/2)+ int(diseaseMeta['incubationDays'])).format('YYYY-MM-DD')
-
 					df['active'] = "true"
 					df['alert'] = "true"
 					df['reminder'] = "false"
@@ -471,18 +492,20 @@ class IdsrAppServer:
 
 	# Check if epedimic is active or ended
 	def getStatus(self,row=None,status=None):
+		currentStatus = 'false'
 		if status == 'active':
 			if pd.to_datetime(self.today) < pd.to_datetime(row['endDate']):
-				return 'active'
+				currentStatus='active'
 			elif pd.to_datetime(row['endDate']) == (pd.to_datetime(self.today)):
-				return 'true'
+				currentStatus='true'
 			else:
-				return 'false'
+				currentStatus='false'
 		elif status == 'reminder':
 			if row['reminderDate'] == pd.to_datetime(self.today):
-				return 'true'
+				currentStatus='true'
 			else:
-				return 'false'
+				currentStatus='false'
+		return pd.Series(currentStatus)
 	# get onset date
 	def getOnSetDate(self,row):
 		if row['eventdate'] == '':
@@ -606,31 +629,31 @@ class IdsrAppServer:
 					aggDf['endDate'] = pd.to_datetime(pd.to_datetime(dfDates['lastCaseDate']) + pd.to_timedelta(pd.np.ceil(2*aggDf['incubationDays']), unit="D")).dt.strftime('%Y-%m-%d')
 					aggDf['reminderDate'] = pd.to_datetime(pd.to_datetime(aggDf['lastCaseDate']) + pd.to_timedelta(pd.np.ceil(2*aggDf['incubationDays']-7), unit="D")).dt.strftime('%Y-%m-%d')
 					aggDf.rename(columns={'ouname':'orgUnitName','ou':'orgUnit'},inplace=True);
-					aggDf['active'] =  aggDf.apply(self.getStatus,args=('active'),axis=1)
-					aggDf['reminder'] =  aggDf.apply(self.getStatus,args=('reminder'),axis=1)
+					aggDf[['active']] =  aggDf.apply(self.getStatus,args=['active'],axis=1)
+					aggDf[['reminder']] =  aggDf.apply(self.getStatus,args=['reminder'],axis=1)
 
 				else:
 					df1 = df.iloc[:,(detectionLevel+4):dfColLength]
 					df.iloc[:,(detectionLevel+4):dfColLength] = df1.apply(pd.to_numeric,errors='coerce').fillna(0).astype(np.int64)
 					if(dateData['height'] > 0):
 						dfDates = self.createDataFrame(dateData,'DATES')
-						dfDates.rename(columns={dfDates.columns[7]:'fldisease',dfDates.columns[8]:'dateOfOnSet'},inplace=True)
+						dfDates.to_csv('aggDfDates.csv',encoding='utf-8')
+						dfDates.rename(columns={dfDates.columns[7]:'disease',dfDates.columns[8]:'dateOfOnSet'},inplace=True)
 						dfDates['dateOfOnSet'] = dfDates.apply(self.getTeiOnSetDate,axis=1)
-						dfDates = dfDates.groupby(['ou','fldisease'])['dateOfOnSet'].agg(['min','max']).reset_index()
+						dfDates = dfDates.groupby(['ou','disease'])['dateOfOnSet'].agg(['min','max']).reset_index()
 						dfDates.rename(columns={'min':'firstCaseDate','max':'lastCaseDate'},inplace=True)
-						df['incubationDays'] = int(diseaseMeta['incubationDays'])
-						df['endDate'] = pd.to_datetime(pd.to_datetime(dfDates['lastCaseDate']) + pd.to_timedelta(pd.np.ceil(2*df['incubationDays']), unit="D")).dt.strftime('%Y-%m-%d')
-						df['reminderDate'] = pd.to_datetime(pd.to_datetime(dfDates['lastCaseDate']) + pd.to_timedelta(pd.np.ceil(2*df['incubationDays']-7), unit="D")).dt.strftime('%Y-%m-%d')
-						df['active'] =  df.apply(self.getStatus,args=('active'),axis=1)
-						df['reminder'] =  df.apply(self.getStatus,args=('reminder'),axis=1)
 						df = pd.merge(df,dfDates,right_on=['ou'],left_on=['organisationunitid'],how='left')
+						df['incubationDays'] = int(diseaseMeta['incubationDays'])
+						df['endDate'] = pd.to_datetime(pd.to_datetime(df['lastCaseDate']) + pd.to_timedelta(pd.np.ceil(2*df['incubationDays']), unit="D")).dt.strftime('%Y-%m-%d')
+						df['reminderDate'] = pd.to_datetime(pd.to_datetime(df['lastCaseDate']) + pd.to_timedelta(pd.np.ceil(2*df['incubationDays']-7), unit="D")).dt.strftime('%Y-%m-%d')
+						df.dropna(subset=['disease'],inplace=True)
+
+						df[['active']] =  df.apply(self.getStatus,args=['active'],axis=1)
+						df[['reminder']] =  df.apply(self.getStatus,args=['reminder'],axis=1)
+
+
 					else:
-						df['active'] = "false"
-						df['endDate'] =""
-						df['firstCaseDate'] =""
-						df['lastCaseDate'] =""
-						df['reminderDate']=""
-						df['reminder'] ="false"
+						pass
 					df.rename(columns={df.columns[10]:'confirmedValue' },inplace=True)
 					df.rename(columns={df.columns[11]:'deathValue' },inplace=True)
 					df.rename(columns={df.columns[12]:'suspectedValue' },inplace=True)
@@ -638,7 +661,8 @@ class IdsrAppServer:
 					df['reportingOrgUnit'] = df.loc[:,'organisationunitid'].apply(self.getOrgUnitValue,args=(orgUnits,(reportingLevel-1),'id'))
 					df.rename(columns={'organisationunitname':'orgUnitName','organisationunitid':'orgUnit'},inplace=True);
 					df['dateOfOnSetWeek'] = self.getIsoWeek(self.today)
-					df['disease'] = diseaseMeta['disease']
+					df["period"]= df['dateOfOnSetWeek']
+					#df['disease'] = diseaseMeta['disease']
 					aggDf = df
 
 				aggDf['alertThreshold'] = int(diseaseMeta['alertThreshold'])
@@ -650,7 +674,7 @@ class IdsrAppServer:
 
 				alertQuery = (aggDf['confirmedValue'] < aggDf['epiThreshold']) & (aggDf['suspectedValue'].astype(np.int64) >= aggDf['alertThreshold'].astype(np.int64)) & (aggDf['endDate'] > self.today)
 				aggDf['alert'] = np.where(alertQuery,'true','false')
-
+				aggDf.to_csv('aggDf.csv',encoding='utf-8')
 				return aggDf
 			else:
 				# No data for cases found
@@ -761,7 +785,7 @@ class IdsrAppServer:
 			deleteColumns =[]
 		return deleteColumns
 	# Get epidemics
-	def getEpidemics(self,programConfig=None,detectedAggEpidemics=None,detectedMergedAlertsMessage=None,dfEpidemics=None,messageColumns=None,alertColumns=None,type='EPIDEMIC'):
+	def getEpidemics(self,programConfig=None,detectedAggEpidemics=None,detectedMergedAlertsMessage=None,dfEpidemics=None,messageColumns=None,alertColumns=None,type='EPIDEMIC',notify=None):
 		dfEpidemics['period'] =pd.to_datetime(dfEpidemics['firstCaseDate']).dt.strftime('%YW%V')
 		if detectedAggEpidemics.empty:
 			print("Nothing to update or detect. Proceeding to next disease")
@@ -778,6 +802,10 @@ class IdsrAppServer:
 		existsEpidemics.columns = existsEpidemics.columns.str.replace('_left', '')
 		# Updated epidemics
 		updatedEpidemics =allAggEpidemics.query("_merge == 'both'")
+		# Drop duplicated columns
+		newEpidemics = newEpidemics.loc[:,~newEpidemics.columns.duplicated()]
+		updatedEpidemics = updatedEpidemics.loc[:,~updatedEpidemics.columns.duplicated()]
+		existsEpidemics = existsEpidemics.loc[:,~existsEpidemics.columns.duplicated()]
 
 
 		print("Number of New Epidemics ", len(newEpidemics.index))
@@ -820,20 +848,22 @@ class IdsrAppServer:
 				pass
 		if newEpidemics.empty is not True:
 			if type == 'EPIDEMIC':
-				newEpidemics['eventDate'] = newEpidemics['firstCaseDate']
-				newEpidemics['status'] = 'COMPLETED'
-				newEpidemics['program'] = str(programConfig['reportingProgram']['id'])
-				newEpidemics['programStage'] = str(programConfig['reportingProgram']['programStage']['id'])
-				newEpidemics['storedBy'] = 'idsr'
+				newEpidemics.loc[:,'eventDate'] = newEpidemics['firstCaseDate']
+				newEpidemics.loc[:,'status'] = 'COMPLETED'
+				newEpidemics.loc[:,'program'] = str(programConfig['reportingProgram']['id'])
+				newEpidemics.loc[:,'programStage'] = str(programConfig['reportingProgram']['programStage']['id'])
+				newEpidemics.loc[:,'storedBy'] = 'idsr'
 				newEpidemics['epicode']=newEpidemics.apply(self.trackEpidemics,args=(dfEpidemics,'epicode',['disease','orgUnit'],'orgUnitCode'),axis=1)
 				newEpidemics['dataValues'] = newEpidemics.apply( self.createEventDatavalues,args=(config,newEpidemics.columns),axis=1);
+				#newEpidemics = newEpidemics.loc[:,~newEpidemics.columns.duplicated()]
 				detectedNewEpidemicsAlertsMessage = newEpidemics.filter(alertColumns)
-				detectedNewEpidemicsAlertsMessage[messageColumns] = detectedNewEpidemicsAlertsMessage.apply(self.createMessage,args=(diseaseMeta['notifiableUserGroups'],'EPIDEMIC'),axis=1)
+				detectedNewEpidemicsAlertsMessage[messageColumns] = detectedNewEpidemicsAlertsMessage.apply(self.createMessage,args=(notify,'EPIDEMIC'),axis=1)
 			else:
+				#newEpidemics = newEpidemics.loc[:,~newEpidemics.columns.duplicated()]
 				detectedNewEpidemicsAlertsMessage = newEpidemics.filter(alertColumns)
-				detectedNewEpidemicsAlertsMessage[messageColumns] = detectedNewEpidemicsAlertsMessage.apply(self.createMessage,args=(diseaseMeta['notifiableUserGroups'],'ALERT'),axis=1)
+				detectedNewEpidemicsAlertsMessage[messageColumns] = detectedNewEpidemicsAlertsMessage.apply(self.createMessage,args=(notify,'ALERT'),axis=1)
 			#mergedAlerts = pd.concat([detectedNewEpidemicsAlerts],sort=False)
-			detectedMergedAlertsMessage = detectedMergedAlertsMessage.append(detectedNewEpidemicsAlerts)
+			detectedMergedAlertsMessage = detectedMergedAlertsMessage.append(detectedNewEpidemicsAlertsMessage)
 		# Merge updated, new and existing epidemics
 		mergedEpidemics = pd.concat([existsEpidemics,updatedEpidemics,newEpidemics],sort=False)
 		return [mergedEpidemics,detectedMergedAlertsMessage]
@@ -864,7 +894,7 @@ class IdsrAppServer:
 		detectedMergedAlerts = pd.DataFrame()
 		# New alerts messages
 		detectedMergedAlertsMessage = pd.DataFrame()
-		alertColumns = ['disease','orgUnit','orgUnitName','reportingOrgUnit','reportingOrgUnitName']
+		alertColumns = ['disease','orgUnit','orgUnitName','reportingOrgUnit','reportingOrgUnitName','confirmedValue','deathValue','suspectedValue','event','period','lastCaseDate','firstCaseDate','epicode','epidemic','alert','status']
 		messageColumns = ['subject','text','users','organisationUnits']
 
 		for diseaseMeta in diseasesMeta['diseases']:
@@ -878,7 +908,7 @@ class IdsrAppServer:
 			piIndicatorsArray = self.getArrayFromObject(diseaseMeta['programIndicators'])
 			piIndicators = piSeparator.join(piIndicatorsArray)
 			piFields = 'analytics'
-
+			notifyUser = diseaseMeta['notifiableUserGroups']
 			if diseaseMeta['epiAlgorithm'] == "CASE_BASED":
 				print("Detecting for case based diseases")
 				print ("Start outbreak detection for %s" %diseaseMeta['disease'])
@@ -906,16 +936,16 @@ class IdsrAppServer:
 				if(( caseEvents != 'HTTP_ERROR') and (epiReportingOrgUnit != 'HTTP_ERROR')):
 					orgUnits = epiReportingOrgUnit['organisationUnits']
 					dateData = self.getHttpData(self.url,teiFields,self.username,self.password,params=teiParams)
-					detectedEpidemics = self.detectBasedOnProgramIndicators(caseEvents,diseaseMeta,orgUnits,type,dateData)
+					detectedAggEpidemics = self.detectBasedOnProgramIndicators(caseEvents,diseaseMeta,orgUnits,type,dateData)
 					detectedAggAlerts = self.queryValue(detectedAggEpidemics,"alert == 'true'")
 					# Creating epidemics alerts
-					mergedAlerts =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggAlerts,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfAlerts,messageColumns=messageColumns,alertColumns=alertColumns,type='ALERT')
+					mergedAlerts =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggAlerts,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfAlerts,messageColumns=messageColumns,alertColumns=alertColumns,type='ALERT',notify=notifyUser)
 					if mergedAlerts is None:
 						return
 					detectedMergedAlertsMessage = mergedAlerts[1]
 					detectedMergedAlerts =  detectedMergedAlerts.append(mergedAlerts[0])
 					# Creating threshold alerts
-					mergedEpidemics =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggEpidemics,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfEpidemics,messageColumns=messageColumns,alertColumns=alertColumns)
+					mergedEpidemics =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggEpidemics,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfEpidemics,messageColumns=messageColumns,alertColumns=alertColumns,notify=notifyUser)
 					if mergedEpidemics is None:
 						return
 					detectedMergedEpidemics = detectedMergedEpidemics.append(mergedEpidemics[0])
@@ -923,8 +953,6 @@ class IdsrAppServer:
 					print ("Finished creating Outbreaks for %s" %diseaseMeta['disease'])
 					# Reminders
 					#reminders = self.queryValue(allAggEpidemics,remindersQuery)
-					### Send outbreak messages
-					print("Sending outbreak messages")
 
 				else:
 					print("Failed to retrieve case events from analytics")
@@ -947,13 +975,13 @@ class IdsrAppServer:
 					detectedAggEpidemics.to_csv('detectedAggEpidemics.csv',encoding='utf-8')
 					detectedAggAlerts = self.queryValue(detectedAggEpidemics,"alert == 'true'")
 					# Creating epidemics alerts
-					mergedAlerts =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggAlerts,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfAlerts,messageColumns=messageColumns,alertColumns=alertColumns,type='ALERT')
+					mergedAlerts =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggAlerts,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfAlerts,messageColumns=messageColumns,alertColumns=alertColumns,type='ALERT',notify=notifyUser)
 					if mergedAlerts is None:
 						return
 					detectedMergedAlertsMessage = mergedAlerts[1]
 					detectedMergedAlerts =  detectedMergedAlerts.append(mergedAlerts[0])
 					# Creating threshold alerts
-					mergedEpidemics =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggEpidemics,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfEpidemics,messageColumns=messageColumns,alertColumns=alertColumns)
+					mergedEpidemics =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggEpidemics,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfEpidemics,messageColumns=messageColumns,alertColumns=alertColumns,notify=notifyUser)
 					if mergedEpidemics is None:
 						return
 					detectedMergedEpidemics = detectedMergedEpidemics.append(mergedEpidemics[0])
@@ -961,13 +989,7 @@ class IdsrAppServer:
 					print ("Finished creating Outbreaks for %s" %diseaseMeta['disease'])
 					# Reminders
 					#reminders = self.queryValue(allAggEpidemics,remindersQuery)
-					### Send outbreak messages
-					print("Sending outbreak messages")
-
-					#detectedNewEpidemicsAlerts.to_csv('dfdetectedNewEpidemic.csv',sep=",",encoding='utf-8')
-					#self.createAlerts(diseaseMeta['notifiableUserGroups'],newEpidemics,'EPIDEMIC')
-					#self.createAlerts(diseaseMeta['notifiableUserGroups'],reminders,'REMINDER')
-					#self.createAlerts(diseaseMeta['notifiableUserGroups'],newAggAlerts,'ALERT')
+					### Send outbreak message
 
 
 				else:
@@ -989,13 +1011,13 @@ class IdsrAppServer:
 					detectedAggEpidemics = self.detectOnAggregateIndicators(aggData,diseaseMeta,epidemics,aggOrgUnit,aggPeriod,mPeriods,nPeriods)
 					detectedAggAlerts = self.queryValue(detectedAggEpidemics,"alert == 'true'")
 					# Creating epidemics alerts
-					mergedAlerts =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggAlerts,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfAlerts,messageColumns=messageColumns,alertColumns=alertColumns,type='ALERT')
+					mergedAlerts =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggAlerts,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfAlerts,messageColumns=messageColumns,alertColumns=alertColumns,type='ALERT',notify=notifyUser)
 					if mergedAlerts is None:
 						return
 					detectedMergedAlertsMessage = mergedAlerts[1]
 					detectedMergedAlerts =  detectedMergedAlerts.append(mergedAlerts[0])
 					# Creating threshold alerts
-					mergedEpidemics =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggEpidemics,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfEpidemics,messageColumns=messageColumns,alertColumns=alertColumns)
+					mergedEpidemics =self.getEpidemics(programConfig=programConfig,detectedAggEpidemics=detectedAggEpidemics,detectedMergedAlertsMessage=detectedMergedAlertsMessage,dfEpidemics=dfEpidemics,messageColumns=messageColumns,alertColumns=alertColumns,notify=notifyUser)
 					if mergedEpidemics is None:
 						return
 					detectedMergedEpidemics = detectedMergedEpidemics.append(mergedEpidemics[0])
@@ -1005,16 +1027,16 @@ class IdsrAppServer:
 					# Reminders
 					#reminders = self.queryValue(allAggEpidemics,remindersQuery)
 					### Send outbreak messages
-					print("Sending outbreak messages")
 				else:
 					print("Failed to retrieve case events from analytics")
 			else:
 				pass
 
-		detectedMergedEpidemics.to_csv('dfDetectedMergedEpidemics.csv',sep=",",encoding='utf-8')
 		# Transform mergedEpidemics to DHIS2 Events format
 		eventColumns = ['event','eventDate','program','programStage','storedBy','status','orgUnit','dataValues']
+		eventDropColumns =["suspectedValue","confirmedValue","deathValue", "period", "firstCaseDate","lastCaseDate","endDate","closeDate","dateReminderSent","reminderSent","epicode","status","disease","orgUnit","orgUnitName","orgUnitCode","reportingOrgUnit", "reportingOrgUnitName","event","program","programStage","incubationDays","storedBy","eventDate","active","updated"]
 		epidemicsColumns = ["suspectedValue","confirmedValue","deathValue", "period", "firstCaseDate","lastCaseDate","endDate","closeDate","dateReminderSent","reminderSent","epicode","dataValues","status","disease","orgUnit","orgUnitName","orgUnitCode","reportingOrgUnit", "reportingOrgUnitName","event","program","programStage","incubationDays","storedBy","eventDate","active","updated"]
+		detectedMergedEpidemics.drop_duplicates(subset=eventDropColumns,inplace=True)
 		dhis2Events = detectedMergedEpidemics.filter(eventColumns)
 		mergedEpidemicsEvents = detectedMergedEpidemics.filter(epidemicsColumns)
 		events = {'events': json.loads(dhis2Events.to_json(orient='records',date_format='iso'))}
@@ -1025,12 +1047,17 @@ class IdsrAppServer:
 		epiUpdateEventEndPoint  = 'events?importStrategy=CREATE_AND_UPDATE'
 		self.postJsonData(self.url,epiUpdateEventEndPoint,self.username,self.password,events)
 		print ("Finished creating Outbreaks")
-		print("Sending alerts")
-		messages = {'messageConversations': json.loads(detectedMergedAlertsMessage.to_json(orient='records')) }
-		self.sendSmsAndEmailMessage(messages)
+		print("Sending alerts and messages")
+		detectedMergedAlertsMessage.drop_duplicates(subset=alertColumns,inplace=True)
+		if detectedMergedAlertsMessage.empty is not True:
+			messages = {'messageConversations': json.loads(detectedMergedAlertsMessage.to_json(orient='records')) }
+			self.sendSmsAndEmailMessage(messages)
+		mergedDataStoresMessages = detectedMergedAlerts.filter(alertColumns)
+		mergedDataStoresMessages.drop_duplicates(subset=alertColumns,inplace=True)
+
 		print("Save alerts in the datastore online")
 		epiUpdateDataStoreEndPointAlert  = 'dataStore/' + self.dataStore + '/alerts'
-		self.updateJsonData(self.url,epiUpdateDataStoreEndPointAlert,self.username,self.password,json.loads(detectedMergedAlerts.to_json(orient='records',date_format='iso')))
+		self.updateJsonData(self.url,epiUpdateDataStoreEndPointAlert,self.username,self.password,json.loads(mergedDataStoresMessages.to_json(orient='records',date_format='iso')))
 
 		return "Done processing"
 
@@ -1047,6 +1074,21 @@ class IdsrAppServer:
 
 		# Get Epidemics
 		if(diseasesMeta != 'HTTP_ERROR'):
+			diseaseConfig = diseasesMeta['config']['notificationProgram']
+
+			# programs
+			self.programUid = diseaseConfig['id']
+			self.outbreakProgram = diseasesMeta['config']['reportingProgram']['id']
+
+			# TE Attributes
+			self.dateOfOnsetUid = diseaseConfig['dateOfOnSet']['id']
+			self.conditionOrDiseaseUid = diseaseConfig['disease']['id']
+			self.patientStatusOutcome = diseaseConfig['patientStatusOutcome']['id']
+			self.regPatientStatusOutcome = diseaseConfig['regPatientStatusOutcome']['id']
+			self.caseClassification = diseaseConfig['caseClassification']['id']
+			self.testResult= diseaseConfig['testResult']['id']
+			self.testResultClassification= diseaseConfig['testResultClassification']['id']
+
 			epidemicsFields = 'dataStore/' + self.dataStore + '/epidemics'
 			epidemicsData = self.getHttpData(self.url,epidemicsFields,self.username,self.password,{})
 
