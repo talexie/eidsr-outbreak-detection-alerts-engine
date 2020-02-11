@@ -327,7 +327,6 @@ class IdsrAppServer:
 				dfColLength = len(df.columns)
 				df1 = df.iloc[:,(detectionLevel+4):dfColLength]
 				df.iloc[:,(detectionLevel+4):dfColLength] = df1.apply(pd.to_numeric,errors='coerce').fillna(0).astype(np.int64)
-				df.to_csv('testidsrbefore1.csv',sep=",",encoding='utf-8')
 				# print(df.iloc[:,(detectionLevel+4):(detectionLevel+4+m)])	# cases, deaths
 
 				### Make generic functions for math
@@ -389,7 +388,6 @@ class IdsrAppServer:
 				df['orgUnit'] = df.iloc[:,detectionLevel]
 				df['orgUnitName'] = df.iloc[:,detectionLevel+1]
 				df['orgUnitCode'] = df.iloc[:,detectionLevel+2]
-				df.to_csv('testidsrpre.csv',sep=",",encoding='utf-8')
 				dropColumns = [col for idx,col in enumerate(df.columns.values.tolist()) if idx > (detectionLevel+4) and idx < (detectionLevel+4+(3*m))]
 				df.drop(columns=dropColumns,inplace=True)
 				df['confirmedValue'] = df.loc[:,'mean_current_cases']
@@ -711,12 +709,14 @@ class IdsrAppServer:
 			else:
 			 	pass
 		#### Check epidemic closure
-		if row['closeDate'] == self.today and row['status']=='Closed':
-		 	event.append({'dataElement': key,'value':'Closed'})
-		 	# Send closure message
+		if hasattr(row,'closeDate'):
+			if(row['closeDate']) == self.today and row['status']=='Closed':
+				event.append({'dataElement': key,'value':'Closed'})
+				# Send closure message
 
-		elif row['dateReminderSent']==self.today and row['status']== 'Closed Vigilance':
-		 	event.append({'dataElement': key,'value':'Closed Vigilance'})
+		elif hasattr(row,'dateReminderSent'):
+			if row['dateReminderSent']==self.today and row['status']== 'Closed Vigilance':
+		 		event.append({'dataElement': key,'value':'Closed Vigilance'})
 			# Send Reminder for closure
 		else:
 			pass
@@ -735,16 +735,19 @@ class IdsrAppServer:
 			query = ['{}{}{}{}'.format(key,' in "',row[key],'"') for key in keys]
 			query = ' and '.join(query)
 			query = '{}{}'.format(query,' and closeDate == ""')
-			filteredDf = df.query(query).sort_values(keys,inplace=True)
-			if filteredDf is None:
-				return self.generateCode(column=row[append],prefix='E',sep='_')
+			if df.empty:
+				return self.generateCode(prefix='E',sep='_')
 			else:
-				checked =  [filteredDf.at[index,check] for index in filteredDf.index]
-				if len(checked) > 0:
-					row[check] = checked[0]
+				filteredDf = df.query(query).sort_values(keys,inplace=True)
+				if filteredDf is None:
+					return self.generateCode(column=row[append],prefix='E',sep='_')
 				else:
-					row[check] = self.generateCode(column=row[append],prefix='E',sep='_')
-				return row[check]
+					checked =  [filteredDf.at[index,check] for index in filteredDf.index]
+					if len(checked) > 0:
+						row[check] = checked[0]
+					else:
+						row[check] = self.generateCode(column=row[append],prefix='E',sep='_')
+					return row[check]
 		else:
 			return self.generateCode(prefix='E',sep='_')
 
@@ -786,26 +789,36 @@ class IdsrAppServer:
 		return deleteColumns
 	# Get epidemics
 	def getEpidemics(self,programConfig=None,detectedAggEpidemics=None,detectedMergedAlertsMessage=None,dfEpidemics=None,messageColumns=None,alertColumns=None,type='EPIDEMIC',notify=None):
-		dfEpidemics['period'] =pd.to_datetime(dfEpidemics['firstCaseDate']).dt.strftime('%YW%V')
+		# New epidemics only
+		newEpidemics = pd.DataFrame()
+		# updated epidemics only
+		updatedEpidemics = pd.DataFrame()
+		# Existing epidemics only
+		existsEpidemics = pd.DataFrame()
+		if dfEpidemics.empty is not True:
+			dfEpidemics['period'] =pd.to_datetime(dfEpidemics['firstCaseDate']).dt.strftime('%YW%V')
 		if detectedAggEpidemics.empty:
 			print("Nothing to update or detect. Proceeding to next disease")
 			return
 		allAggEpidemics = self.getDfUpdatedEpidemics(dfEpidemics,detectedAggEpidemics,mergeColumns=['orgUnit','disease','period'],how='outer',track=True,epidemic=False)
 		remindersQuery = "{}{}{}'".format("reminderDate", "=='", self.today)
 		# New epidemics
-		newEpidemics = allAggEpidemics.query("_merge == 'right_only'")
-		newEpidemics.drop(list(newEpidemics.filter(regex = '_left')), axis = 1, inplace = True)
-		newEpidemics.columns = newEpidemics.columns.str.replace('_right', '')
-		# Existing epidemics and not updated
-		existsEpidemics = allAggEpidemics.query("_merge == 'left_only'")
-		existsEpidemics.drop(list(existsEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
-		existsEpidemics.columns = existsEpidemics.columns.str.replace('_left', '')
-		# Updated epidemics
-		updatedEpidemics =allAggEpidemics.query("_merge == 'both'")
-		# Drop duplicated columns
-		newEpidemics = newEpidemics.loc[:,~newEpidemics.columns.duplicated()]
-		updatedEpidemics = updatedEpidemics.loc[:,~updatedEpidemics.columns.duplicated()]
-		existsEpidemics = existsEpidemics.loc[:,~existsEpidemics.columns.duplicated()]
+		if '_merge' in allAggEpidemics.columns:
+			newEpidemics = allAggEpidemics.query("_merge == 'right_only'")
+			newEpidemics.drop(list(newEpidemics.filter(regex = '_left')), axis = 1, inplace = True)
+			newEpidemics.columns = newEpidemics.columns.str.replace('_right', '')
+			# Existing epidemics and not updated
+			existsEpidemics = allAggEpidemics.query("_merge == 'left_only'")
+			existsEpidemics.drop(list(existsEpidemics.filter(regex = '_right')), axis = 1, inplace = True)
+			existsEpidemics.columns = existsEpidemics.columns.str.replace('_left', '')
+			# Updated epidemics
+			updatedEpidemics =allAggEpidemics.query("_merge == 'both'")
+			# Drop duplicated columns
+			newEpidemics = newEpidemics.loc[:,~newEpidemics.columns.duplicated()]
+			updatedEpidemics = updatedEpidemics.loc[:,~updatedEpidemics.columns.duplicated()]
+			existsEpidemics = existsEpidemics.loc[:,~existsEpidemics.columns.duplicated()]
+		if '_merge' not in allAggEpidemics.columns:
+			newEpidemics = allAggEpidemics
 
 
 		print("Number of New Epidemics ", len(newEpidemics.index))
@@ -854,7 +867,7 @@ class IdsrAppServer:
 				newEpidemics.loc[:,'programStage'] = str(programConfig['reportingProgram']['programStage']['id'])
 				newEpidemics.loc[:,'storedBy'] = 'idsr'
 				newEpidemics['epicode']=newEpidemics.apply(self.trackEpidemics,args=(dfEpidemics,'epicode',['disease','orgUnit'],'orgUnitCode'),axis=1)
-				newEpidemics['dataValues'] = newEpidemics.apply( self.createEventDatavalues,args=(config,newEpidemics.columns),axis=1);
+				newEpidemics['dataValues'] = newEpidemics.apply( self.createEventDatavalues,args=(config,newEpidemics.columns),axis=1)
 				#newEpidemics = newEpidemics.loc[:,~newEpidemics.columns.duplicated()]
 				detectedNewEpidemicsAlertsMessage = newEpidemics.filter(alertColumns)
 				detectedNewEpidemicsAlertsMessage[messageColumns] = detectedNewEpidemicsAlertsMessage.apply(self.createMessage,args=(notify,'EPIDEMIC'),axis=1)
@@ -1036,7 +1049,10 @@ class IdsrAppServer:
 		eventColumns = ['event','eventDate','program','programStage','storedBy','status','orgUnit','dataValues']
 		eventDropColumns =["suspectedValue","confirmedValue","deathValue", "period", "firstCaseDate","lastCaseDate","endDate","closeDate","dateReminderSent","reminderSent","epicode","status","disease","orgUnit","orgUnitName","orgUnitCode","reportingOrgUnit", "reportingOrgUnitName","event","program","programStage","incubationDays","storedBy","eventDate","active","updated"]
 		epidemicsColumns = ["suspectedValue","confirmedValue","deathValue", "period", "firstCaseDate","lastCaseDate","endDate","closeDate","dateReminderSent","reminderSent","epicode","dataValues","status","disease","orgUnit","orgUnitName","orgUnitCode","reportingOrgUnit", "reportingOrgUnitName","event","program","programStage","incubationDays","storedBy","eventDate","active","updated"]
-		detectedMergedEpidemics.drop_duplicates(subset=eventDropColumns,inplace=True)
+		try:
+			detectedMergedEpidemics.drop_duplicates(subset=eventDropColumns,inplace=True)
+		except KeyError:
+			print("Key error in ", eventDropColumns)
 		dhis2Events = detectedMergedEpidemics.filter(eventColumns)
 		mergedEpidemicsEvents = detectedMergedEpidemics.filter(epidemicsColumns)
 		events = {'events': json.loads(dhis2Events.to_json(orient='records',date_format='iso'))}
@@ -1048,12 +1064,19 @@ class IdsrAppServer:
 		self.postJsonData(self.url,epiUpdateEventEndPoint,self.username,self.password,events)
 		print ("Finished creating Outbreaks")
 		print("Sending alerts and messages")
-		detectedMergedAlertsMessage.drop_duplicates(subset=alertColumns,inplace=True)
+		try:
+			detectedMergedAlertsMessage.drop_duplicates(subset=alertColumns,inplace=True)
+		except KeyError:
+			print("Key error in ",alertColumns)
 		if detectedMergedAlertsMessage.empty is not True:
 			messages = {'messageConversations': json.loads(detectedMergedAlertsMessage.to_json(orient='records')) }
 			self.sendSmsAndEmailMessage(messages)
+		
 		mergedDataStoresMessages = detectedMergedAlerts.filter(alertColumns)
-		mergedDataStoresMessages.drop_duplicates(subset=alertColumns,inplace=True)
+		try:
+			mergedDataStoresMessages.drop_duplicates(subset=alertColumns,inplace=True)
+		except KeyError:
+			print("Key error in ",alertColumns)
 
 		print("Save alerts in the datastore online")
 		epiUpdateDataStoreEndPointAlert  = 'dataStore/' + self.dataStore + '/alerts'
